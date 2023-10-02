@@ -180,12 +180,11 @@ fn find_best_overlap(pos_a_source : &[Sample], pos_a : isize, pos_b_source : &[S
 fn do_timestretch(in_data : &[Sample], samplerate : f64, scale_length : f64, window_secs : f64, known_offsets : Option<&Vec<isize>>) -> (Vec<Sample>, Vec<isize>)
 {
     let window_size = ((samplerate * window_secs      ) as isize).max(4);
-    let search_dist = ((samplerate * window_secs / 4.0) as isize).min(window_size/2-1).max(0);
+    let search_dist = ((samplerate * window_secs / 2.5) as isize).min(window_size/2-1).max(0);
     
     let mut out_data = vec![Sample { l: 0.0, r: 0.0 }; (in_data.len() as f64 * scale_length as f64) as usize];
     let mut envelope = vec![0.0; out_data.len()];
     
-    //let lapping = (2 as f64 / scale_length.min(1.0)) as isize;
     let mut lapping = 2;
     if scale_length < 1.0
     {
@@ -225,7 +224,10 @@ fn do_timestretch(in_data : &[Sample], samplerate : f64, scale_length : f64, win
     }
     for i in 0..out_data.len()
     {
-        out_data[i] /= envelope[i];
+        if envelope[i] != 0.0
+        {
+            out_data[i] /= envelope[i];
+        }
     }
     (out_data, offsets)
 }
@@ -304,14 +306,12 @@ fn main() -> Result<(), hound::Error>
 
     let in_data: Vec<f32> = match sample_format
     {
-        hound::SampleFormat::Int =>
-            reader.samples::<i16>().map(|sample| sample.unwrap() as f32 / 32768.0).collect(),
-        hound::SampleFormat::Float =>
-            reader.samples::<f32>().map(|sample| sample.unwrap()).collect(),
+        hound::SampleFormat::Int => reader.samples::<i16>().map(|sample| sample.unwrap() as f32 / 32768.0).collect(),
+        hound::SampleFormat::Float => reader.samples::<f32>().map(|sample| sample.unwrap()).collect()
     };
 
     let in_data : Vec<Sample> = in_data
-        .chunks(2)
+        .chunks(reader.spec().channels.into())
         .map(|chunk| match chunk.len()
         {
             2 => Sample
@@ -327,21 +327,21 @@ fn main() -> Result<(), hound::Error>
             count => panic!(
                 "unsupported audio channel count {} (only 1- and 2-channel audio supported)",
                 count
-            ),
-        })
-        .collect();
+            )
+        }).collect();
     
     let samplerate = reader.spec().sample_rate;
     
-    let time_factor = 0.25;
+    // FIXME take from command-line arguments
+    let time_factor = 1.1;
     let do_multiband = true;
     
     let output = if do_multiband
     {
-        let window_secs_bass      = 0.16;
-        let window_secs_mid       = 0.08;
-        let window_secs_treble    = 0.02;
-        let window_secs_presence  = 0.005;
+        let window_secs_bass      = 0.2;
+        let window_secs_mid       = 0.16;
+        let window_secs_treble    = 0.08;
+        let window_secs_presence  = 0.01;
         
         let (bass, _temp)      = do_freq_split(&in_data[..], samplerate as f64, 400.0);
         let (mid, _temp)       = do_freq_split(&_temp[..]  , samplerate as f64, 1600.0);
@@ -368,13 +368,14 @@ fn main() -> Result<(), hound::Error>
     }
     else
     {
-        let (out_raw, _) = do_timestretch(&in_data[..], samplerate as f64, time_factor, 0.16, None);
+        let window_secs = 0.2;
+        println!("timestretching full-spectrum audio...");
+        let (out_raw, _) = do_timestretch(&in_data[..], samplerate as f64, time_factor, window_secs, None);
         out_raw
     };
     
     let out: Vec<_> = output
         .into_iter()
-        //.flat_map(|sample| vec![(sample.l * 32768.0) as i16, (sample.r * 32768.0) as i16])
         .flat_map(|sample| vec![sample.l, sample.r])
         .collect();
 
