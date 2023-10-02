@@ -11,6 +11,7 @@ struct Sample
 
 impl Sample
 {
+/*
     fn energy_sq(&self) -> f32
     {
         self.l*self.l + self.r*self.r
@@ -19,6 +20,7 @@ impl Sample
     {
         self.energy_sq().sqrt()
     }
+*/
     fn energy_abs(&self) -> f32
     {
         self.l.abs() + self.r.abs()
@@ -82,29 +84,37 @@ impl core::ops::Div<f32> for Sample
 }
 
 
-impl core::ops::AddAssign<Sample> for Sample {
-    fn add_assign(&mut self, other: Sample) {
+impl core::ops::AddAssign<Sample> for Sample
+{
+    fn add_assign(&mut self, other: Sample)
+    {
         self.l += other.l;
         self.r += other.r;
     }
 }
 
-impl core::ops::SubAssign<Sample> for Sample {
-    fn sub_assign(&mut self, other: Sample) {
+impl core::ops::SubAssign<Sample> for Sample
+{
+    fn sub_assign(&mut self, other: Sample)
+    {
         self.l -= other.l;
         self.r -= other.r;
     }
 }
 
-impl core::ops::MulAssign<f32> for Sample {
-    fn mul_assign(&mut self, scalar: f32) {
+impl core::ops::MulAssign<f32> for Sample
+{
+    fn mul_assign(&mut self, scalar: f32)
+    {
         self.l *= scalar;
         self.r *= scalar;
     }
 }
 
-impl core::ops::DivAssign<f32> for Sample {
-    fn div_assign(&mut self, divisor: f32) {
+impl core::ops::DivAssign<f32> for Sample
+{
+    fn div_assign(&mut self, divisor: f32)
+    {
         self.l /= divisor;
         self.r /= divisor;
     }
@@ -130,7 +140,7 @@ fn calc_overlap_energy(pos_a_source : &[Sample], pos_a : isize, pos_b_source : &
             continue;
         }
         
-        let mut t = (j as f32 + 0.5) / (len as f32);
+        let t = (j as f32 + 0.5) / (len as f32);
         let w = window(t);
         
         let a = pos_a_source[ap as usize];
@@ -140,7 +150,7 @@ fn calc_overlap_energy(pos_a_source : &[Sample], pos_a : isize, pos_b_source : &
     energy
 }
 
-fn find_best_overlap(pos_a_source : &[Sample], pos_a : isize, pos_b_source : &[Sample], pos_b : isize, len : isize, range : isize) -> isize
+fn find_best_overlap(pos_a_source : &[Sample], pos_a : isize, pos_b_source : &[Sample], pos_b : isize, len : isize, range : isize, min_offs : isize) -> isize
 {
     let subdiv = 5;
     let mut best_energy = 0.0;
@@ -153,6 +163,10 @@ fn find_best_overlap(pos_a_source : &[Sample], pos_a : isize, pos_b_source : &[S
         for i in -subdiv..=subdiv
         {
             let offset = range*i/subdiv.pow(pass) + base_offset;
+            if offset < min_offs
+            {
+                continue;
+            }
             let energy = calc_overlap_energy(pos_a_source, pos_a + offset, pos_b_source, pos_b, len);
             if energy > best_energy
             {
@@ -165,29 +179,32 @@ fn find_best_overlap(pos_a_source : &[Sample], pos_a : isize, pos_b_source : &[S
     best_offset
 }
 
-fn do_timestretch(in_data : &[Sample], freq : f64, scale_length : f64, window_secs : f64) -> Vec<Sample>
+fn do_timestretch(in_data : &[Sample], samplerate : f64, scale_length : f64, window_secs : f64, known_offsets : Option<&Vec<isize>>) -> (Vec<Sample>, Vec<isize>)
 {
-    let window_size = ((freq * window_secs    ) as isize).max(4);
-    let search_dist = ((freq * window_secs/4.0) as isize).min(window_size/2-1).max(0);
+    let window_size = ((samplerate * window_secs      ) as isize).max(4);
+    let search_dist = ((samplerate * window_secs / 4.0) as isize).min(window_size/2-1).max(0);
     
     let mut out_data = vec![Sample { l: 0.0, r: 0.0 }; (in_data.len() as f64 * scale_length as f64) as usize];
     let mut envelope = vec![0.0; out_data.len()];
     
     let lapping = 2;
     
+    let mut offsets = Vec::new();
     for i in 0..out_data.len() as isize/window_size*lapping
     {
         let chunk_pos_out = i*window_size/lapping;
-        let mut chunk_pos_in = chunk_pos_out * in_data.len() as isize / out_data.len() as isize;
+        let chunk_pos_in = chunk_pos_out * in_data.len() as isize / out_data.len() as isize;
         
+        let min_offs = known_offsets.map(|x| x[i as usize]).unwrap_or(-1000000);
         let offs = if i > 0
         {
-            find_best_overlap(&out_data[..], chunk_pos_out, &in_data[..], chunk_pos_in, window_size, search_dist)
+            find_best_overlap(&out_data[..], chunk_pos_out, &in_data[..], chunk_pos_in, window_size, search_dist, min_offs)
         }
         else
         {
             0
         };
+        offsets.push(offs.max(min_offs));
         
         for j in 0..window_size
         {
@@ -195,7 +212,7 @@ fn do_timestretch(in_data : &[Sample], freq : f64, scale_length : f64, window_se
             {
                 break;
             }
-            let mut t = (j as f32 + 0.5) / (window_size as f32);
+            let t = (j as f32 + 0.5) / (window_size as f32);
             let w = window(t);
             let d = in_data[(chunk_pos_in + j) as usize];
             out_data[(chunk_pos_out + j + offs) as usize] += d*w;
@@ -206,7 +223,66 @@ fn do_timestretch(in_data : &[Sample], freq : f64, scale_length : f64, window_se
     {
         out_data[i] /= envelope[i];
     }
-    out_data
+    (out_data, offsets)
+}
+
+fn do_freq_split(in_data : &[Sample], samplerate : f64, freq : f64) -> (Vec<Sample>, Vec<Sample>)
+{
+    let bandwidth_length = 1.0 / freq;
+    let filter_size_ms = bandwidth_length * 8.0;
+    let filter_size = ((samplerate * filter_size_ms) as usize).max(1);
+    if filter_size % 2 == 0
+    {
+        println!("filter size ({}) is even", filter_size);
+    }
+    else
+    {
+        println!("filter size ({}) is NOT even (is odd)", filter_size);
+    }
+    let mut sinc_table = vec!(0.0f32; filter_size);
+    let adjusted_freq = (freq * 2.0 / samplerate) as f32;
+    let mut energy = 0.0;
+    for i in 0..filter_size
+    {
+        let t = (i as f32 + if filter_size % 2 == 0 { 0.0 } else { 0.5 }) / (filter_size as f32);
+        let w = window(t);
+        let x = (t * 2.0 - 1.0) * filter_size as f32 / 2.0 * adjusted_freq * std::f32::consts::PI;
+        let e = if x == 0.0
+        {
+            1.0
+        }
+        else
+        {
+            x.sin() / x
+        } * w;
+        energy += e;
+        sinc_table[i] = e;
+    }
+    for i in 0..filter_size
+    {
+        sinc_table[i] /= energy;
+    }
+    println!("filter energy: {}. normalizing.", energy);
+    
+    let mut out_lo = vec!(Sample { l : 0.0, r : 0.0 }; in_data.len());
+    let mut out_hi = vec!(Sample { l : 0.0, r : 0.0 }; in_data.len());
+    for i in 0..in_data.len()
+    {
+        let o = filter_size/2;
+        let mut sum = Sample { l : 0.0, r : 0.0 };
+        for j in 0..filter_size
+        {
+            let s = (i + j) as isize - o as isize;
+            if s < 0 || s as usize >= in_data.len()
+            {
+                continue;
+            }
+            sum += in_data[s as usize] * sinc_table[j];
+        }
+        out_lo[i] = sum;
+        out_hi[i] = in_data[i] - out_lo[i];
+    }
+    (out_lo, out_hi)
 }
 
 fn main() -> Result<(), Error>
@@ -221,10 +297,6 @@ fn main() -> Result<(), Error>
     // Load audio from a WAV file into a Vec<i16>
     let mut reader = WavReader::open(&args[1])?;
     let in_data: Vec<i16> = reader.samples::<i16>().map(|sample| sample.unwrap()).collect();
-    
-    let freq = reader.spec().sample_rate;
-    
-    let window_secs = 0.05;
     
     let in_data : Vec<Sample> = in_data
         .chunks(2)
@@ -247,25 +319,62 @@ fn main() -> Result<(), Error>
         })
         .collect();
     
-    let out_data = do_timestretch(&in_data[..], freq as f64, 1.1, 0.08);
+    let samplerate = reader.spec().sample_rate;
     
-    // Convert stereo audio data back to a Vec<i16> for writing
-    let out_i16: Vec<i16> = out_data
+    let do_multiband = true;
+    
+    let output = if do_multiband
+    {
+        let window_secs_bass      = 0.08;
+        let window_secs_mid       = 0.08;
+        let window_secs_treble    = 0.02;
+        let window_secs_presence  = 0.005;
+        
+        let (bass, _temp)      = do_freq_split(&in_data[..], samplerate as f64, 400.0);
+        let (mid, _temp)       = do_freq_split(&_temp[..]  , samplerate as f64, 1600.0);
+        let (treble, presence) = do_freq_split(&_temp[..]  , samplerate as f64, 6400.0);
+        
+        println!("timestretching presence frequency band...");
+        let (out_presence , presence_offs) = do_timestretch(&presence [..], samplerate as f64, 1.1, window_secs_presence, None);
+        println!("timestretching treble frequency band...");
+        let (out_treble   , treble_offs  ) = do_timestretch(&treble   [..], samplerate as f64, 1.1, window_secs_treble, Some(&presence_offs));
+        println!("timestretching mid frequency band...");
+        let (out_mid      , mid_offs     ) = do_timestretch(&mid      [..], samplerate as f64, 1.1, window_secs_mid, Some(&treble_offs));
+        println!("timestretching bass frequency band...");
+        let (out_bass     , _            ) = do_timestretch(&bass     [..], samplerate as f64, 1.1, window_secs_bass, Some(&mid_offs));
+        
+        let mut out_data = out_bass.clone();
+        for (i, val) in out_data.iter_mut().enumerate()
+        {
+            *val += out_mid[i];
+            *val += out_treble[i];
+            *val += out_presence[i];
+        }
+        
+        out_data
+    }
+    else
+    {
+        let (out_raw, _) = do_timestretch(&in_data[..], samplerate as f64, 1.1, 0.08, None);
+        out_raw
+    };
+    
+    let out: Vec<_> = output
         .into_iter()
-        .flat_map(|sample| vec![(sample.l * 32768.0) as i16, (sample.r * 32768.0) as i16])
+        //.flat_map(|sample| vec![(sample.l * 32768.0) as i16, (sample.r * 32768.0) as i16])
+        .flat_map(|sample| vec![sample.l, sample.r])
         .collect();
 
-    // Save modified audio data to a WAV file
     let spec = hound::WavSpec
     {
-        channels: 2, // Stereo
-        sample_rate: 44100, // Sample rate (adjust as needed)
-        bits_per_sample: 16, // 16-bit integer
-        sample_format: hound::SampleFormat::Int,
+        channels: 2,
+        sample_rate: samplerate,
+        bits_per_sample: 32,
+        sample_format: hound::SampleFormat::Float,
     };
     let mut writer = WavWriter::create(&args[2], spec)?;
 
-    for sample in out_i16
+    for sample in out
     {
         writer.write_sample(sample)?;
     }
