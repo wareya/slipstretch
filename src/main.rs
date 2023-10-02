@@ -9,79 +9,43 @@ struct Sample
 
 impl Sample
 {
-/*
     fn energy_sq(&self) -> f32
     {
         self.l*self.l + self.r*self.r
     }
-    fn energy(&self) -> f32
-    {
-        self.energy_sq().sqrt()
-    }
-*/
-    fn energy_abs(&self) -> f32
-    {
-        self.l.abs() + self.r.abs()
-    }
 }
-
 impl core::ops::Add<Sample> for Sample
 {
     type Output = Sample;
-
     fn add(self, other: Sample) -> Sample
     {
-        Sample
-        {
-            l: self.l + other.l,
-            r: self.r + other.r,
-        }
+        Sample { l: self.l + other.l, r: self.r + other.r }
     }
 }
-
 impl core::ops::Sub<Sample> for Sample
 {
     type Output = Sample;
-
     fn sub(self, other: Sample) -> Sample
     {
-        Sample
-        {
-            l: self.l - other.l,
-            r: self.r - other.r,
-        }
+        Sample { l: self.l - other.l, r: self.r - other.r }
     }
 }
-
 impl core::ops::Mul<f32> for Sample
 {
     type Output = Sample;
-
     fn mul(self, scalar: f32) -> Sample
     {
-        Sample
-        {
-            l: self.l * scalar,
-            r: self.r * scalar,
-        }
+        Sample { l: self.l * scalar, r: self.r * scalar }
     }
 }
-
 impl core::ops::Div<f32> for Sample
 {
     type Output = Sample;
-
     fn div(self, divisor: f32) -> Sample
     {
-        Sample
-        {
-            l: self.l / divisor,
-            r: self.r / divisor,
-        }
+        Sample { l: self.l / divisor, r: self.r / divisor }
     }
 }
-
-
 impl core::ops::AddAssign<Sample> for Sample
 {
     fn add_assign(&mut self, other: Sample)
@@ -90,7 +54,6 @@ impl core::ops::AddAssign<Sample> for Sample
         self.r += other.r;
     }
 }
-
 impl core::ops::SubAssign<Sample> for Sample
 {
     fn sub_assign(&mut self, other: Sample)
@@ -118,11 +81,16 @@ impl core::ops::DivAssign<f32> for Sample
     }
 }
 
+fn lerp(a : f32, b : f32, t : f32) -> f32
+{
+    a * (1.0 - t) + b * t
+}
 fn window(mut x : f32) -> f32
 {
     x = x*2.0 - 1.0;
     x = x*x;
     x = 1.0 - x * (2.0 - x);
+    x = 2.0 * (x * x) * (1.5 - x);
     x
 }
 
@@ -143,7 +111,7 @@ fn calc_overlap_energy(pos_a_source : &[Sample], pos_a : isize, pos_b_source : &
         
         let a = pos_a_source[ap as usize];
         let b = pos_b_source[bp as usize] * w;
-        energy += (a + b).energy_abs();
+        energy += (a + b).energy_sq();
     }
     energy
 }
@@ -174,7 +142,6 @@ fn find_best_overlap(pos_a_source : &[Sample], pos_a : isize, pos_b_source : &[S
             }
         }
     }
-    
     best_offset
 }
 
@@ -197,18 +164,16 @@ fn do_timestretch(in_data : &[Sample], samplerate : f64, scale_length : f64, win
     for i in 0..out_data.len() as isize/window_size*lapping
     {
         let chunk_pos_out = i*window_size/lapping;
-        let chunk_pos_in = chunk_pos_out * in_data.len() as isize / out_data.len() as isize;
+        let pure_offset = ((1.0 - 2.0_f64.powf(1.0 - scale_length)) * (window_size/2) as f64) as isize; // this is a guess
+        let chunk_pos_in = chunk_pos_out * in_data.len() as isize / out_data.len() as isize - pure_offset;
         
         let min_offs = known_offsets.map(|x| x[i as usize]).unwrap_or(-1000000);
-        let offs = if i > 0
+        let mut offs = 0;
+        if i > 0
         {
-            find_best_overlap(&out_data[..], chunk_pos_out, &in_data[..], chunk_pos_in, window_size, search_dist, min_offs)
+            offs = find_best_overlap(&out_data[..], chunk_pos_out, &in_data[..], chunk_pos_in, window_size, search_dist, min_offs);
         }
-        else
-        {
-            0
-        };
-        offsets.push(offs.max(min_offs));
+        offsets.push(offs);
         
         for j in 0..window_size
         {
@@ -315,26 +280,15 @@ fn main() -> Result<(), hound::Error>
         .chunks(reader.spec().channels.into())
         .map(|chunk| match chunk.len()
         {
-            2 => Sample
-            {
-                l: chunk[0],
-                r: chunk[1],
-            },
-            1 => Sample
-            {
-                l: chunk[0],
-                r: chunk[0],
-            },
-            count => panic!(
-                "unsupported audio channel count {} (only 1- and 2-channel audio supported)",
-                count
-            )
+            2 => Sample { l: chunk[0], r: chunk[1] },
+            1 => Sample { l: chunk[0], r: chunk[0] },
+            count => panic!("unsupported audio channel count {} (only 1- and 2-channel audio supported)", count)
         }).collect();
     
     let samplerate = reader.spec().sample_rate;
     
-    let time_factor = f64::from_str(&args[3]).unwrap_or_else(|x| panic!("third argument must be a number"));
-    let multiband_window_size = args.get(4).map(|x| f64::from_str(x).unwrap_or_else(|x| panic!("fourth argument must be a number"))).unwrap_or(0.0);
+    let time_factor = f64::from_str(&args[3]).unwrap_or_else(|_| panic!("third argument must be a number"));
+    let multiband_window_size = args.get(4).map(|x| f64::from_str(x).unwrap_or_else(|_| panic!("fourth argument must be a number"))).unwrap_or(0.0);
     let do_multiband = multiband_window_size == 0.0;
     
     let output = if do_multiband
@@ -374,10 +328,7 @@ fn main() -> Result<(), hound::Error>
         out_raw
     };
     
-    let out: Vec<_> = output
-        .into_iter()
-        .flat_map(|sample| vec![sample.l, sample.r])
-        .collect();
+    let out: Vec<_> = output.into_iter().flat_map(|sample| vec![sample.l, sample.r]).collect();
 
     let spec = hound::WavSpec
     {
