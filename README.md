@@ -5,4 +5,8 @@ The underlying audio stretching algorithm after splitting the audio stream up in
 
 ## Examples
 
-See the [examples directory](https://github.com/wareya/slipstretch/tree/main/example).
+Music example (multiband -> fullband -> original) (make sure to unmute it):
+
+https://github.com/wareya/slipstretch/assets/585488/6955189c-ed54-44dd-b637-162d1dc841aa
+
+For more, see the [examples directory](https://github.com/wareya/slipstretch/tree/main/example).
