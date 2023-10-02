@@ -1,7 +1,5 @@
 extern crate hound;
 
-use hound::{WavReader, WavWriter, Error};
-
 #[derive(Clone, Copy, Debug)]
 struct Sample
 {
@@ -187,7 +185,13 @@ fn do_timestretch(in_data : &[Sample], samplerate : f64, scale_length : f64, win
     let mut out_data = vec![Sample { l: 0.0, r: 0.0 }; (in_data.len() as f64 * scale_length as f64) as usize];
     let mut envelope = vec![0.0; out_data.len()];
     
-    let lapping = 2;
+    //let lapping = (2 as f64 / scale_length.min(1.0)) as isize;
+    let mut lapping = 2;
+    if scale_length < 1.0
+    {
+        lapping = lapping.max((2.0 / scale_length.min(1.0)).ceil() as isize);
+    }
+    println!("lapping: {}", lapping);
     
     let mut offsets = Vec::new();
     for i in 0..out_data.len() as isize/window_size*lapping
@@ -229,16 +233,17 @@ fn do_timestretch(in_data : &[Sample], samplerate : f64, scale_length : f64, win
 fn do_freq_split(in_data : &[Sample], samplerate : f64, freq : f64) -> (Vec<Sample>, Vec<Sample>)
 {
     let bandwidth_length = 1.0 / freq;
-    let filter_size_ms = bandwidth_length * 8.0;
+    let filter_size_ms = bandwidth_length * 8.0; // 8.0 - filter bandwidth constant
     let filter_size = ((samplerate * filter_size_ms) as usize).max(1);
     if filter_size % 2 == 0
     {
-        println!("filter size ({}) is even", filter_size);
+        println!("filter size ({}) is even. building sinc table", filter_size);
     }
     else
     {
-        println!("filter size ({}) is NOT even (is odd)", filter_size);
+        println!("filter size ({}) is NOT even (is odd). building sinc table", filter_size);
     }
+    
     let mut sinc_table = vec!(0.0f32; filter_size);
     let adjusted_freq = (freq * 2.0 / samplerate) as f32;
     let mut energy = 0.0;
@@ -285,7 +290,7 @@ fn do_freq_split(in_data : &[Sample], samplerate : f64, freq : f64) -> (Vec<Samp
     (out_lo, out_hi)
 }
 
-fn main() -> Result<(), Error>
+fn main() -> Result<(), hound::Error>
 {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3
@@ -294,23 +299,30 @@ fn main() -> Result<(), Error>
         return Ok(());
     }
     
-    // Load audio from a WAV file into a Vec<i16>
-    let mut reader = WavReader::open(&args[1])?;
-    let in_data: Vec<i16> = reader.samples::<i16>().map(|sample| sample.unwrap()).collect();
-    
+    let mut reader = hound::WavReader::open(&args[1])?;
+    let sample_format = reader.spec().sample_format;
+
+    let in_data: Vec<f32> = match sample_format
+    {
+        hound::SampleFormat::Int =>
+            reader.samples::<i16>().map(|sample| sample.unwrap() as f32 / 32768.0).collect(),
+        hound::SampleFormat::Float =>
+            reader.samples::<f32>().map(|sample| sample.unwrap()).collect(),
+    };
+
     let in_data : Vec<Sample> = in_data
         .chunks(2)
         .map(|chunk| match chunk.len()
         {
             2 => Sample
             {
-                l: chunk[0] as f32 / 32768.0,
-                r: chunk[1] as f32 / 32768.0,
+                l: chunk[0],
+                r: chunk[1],
             },
             1 => Sample
             {
-                l: chunk[0] as f32 / 32768.0,
-                r: 0.0,
+                l: chunk[0],
+                r: chunk[0],
             },
             count => panic!(
                 "unsupported audio channel count {} (only 1- and 2-channel audio supported)",
@@ -321,11 +333,12 @@ fn main() -> Result<(), Error>
     
     let samplerate = reader.spec().sample_rate;
     
+    let time_factor = 0.25;
     let do_multiband = true;
     
     let output = if do_multiband
     {
-        let window_secs_bass      = 0.08;
+        let window_secs_bass      = 0.16;
         let window_secs_mid       = 0.08;
         let window_secs_treble    = 0.02;
         let window_secs_presence  = 0.005;
@@ -335,13 +348,13 @@ fn main() -> Result<(), Error>
         let (treble, presence) = do_freq_split(&_temp[..]  , samplerate as f64, 6400.0);
         
         println!("timestretching presence frequency band...");
-        let (out_presence , presence_offs) = do_timestretch(&presence [..], samplerate as f64, 1.1, window_secs_presence, None);
+        let (out_presence , presence_offs) = do_timestretch(&presence [..], samplerate as f64, time_factor, window_secs_presence, None);
         println!("timestretching treble frequency band...");
-        let (out_treble   , treble_offs  ) = do_timestretch(&treble   [..], samplerate as f64, 1.1, window_secs_treble, Some(&presence_offs));
+        let (out_treble   , treble_offs  ) = do_timestretch(&treble   [..], samplerate as f64, time_factor, window_secs_treble, Some(&presence_offs));
         println!("timestretching mid frequency band...");
-        let (out_mid      , mid_offs     ) = do_timestretch(&mid      [..], samplerate as f64, 1.1, window_secs_mid, Some(&treble_offs));
+        let (out_mid      , mid_offs     ) = do_timestretch(&mid      [..], samplerate as f64, time_factor, window_secs_mid, Some(&treble_offs));
         println!("timestretching bass frequency band...");
-        let (out_bass     , _            ) = do_timestretch(&bass     [..], samplerate as f64, 1.1, window_secs_bass, Some(&mid_offs));
+        let (out_bass     , _            ) = do_timestretch(&bass     [..], samplerate as f64, time_factor, window_secs_bass, Some(&mid_offs));
         
         let mut out_data = out_bass.clone();
         for (i, val) in out_data.iter_mut().enumerate()
@@ -355,7 +368,7 @@ fn main() -> Result<(), Error>
     }
     else
     {
-        let (out_raw, _) = do_timestretch(&in_data[..], samplerate as f64, 1.1, 0.08, None);
+        let (out_raw, _) = do_timestretch(&in_data[..], samplerate as f64, time_factor, 0.16, None);
         out_raw
     };
     
@@ -372,7 +385,7 @@ fn main() -> Result<(), Error>
         bits_per_sample: 32,
         sample_format: hound::SampleFormat::Float,
     };
-    let mut writer = WavWriter::create(&args[2], spec)?;
+    let mut writer = hound::WavWriter::create(&args[2], spec)?;
 
     for sample in out
     {
