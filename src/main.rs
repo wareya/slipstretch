@@ -1,4 +1,4 @@
-extern crate hound;
+use std::str::FromStr;
 
 #[derive(Clone, Copy, Debug)]
 struct Sample
@@ -154,7 +154,7 @@ fn find_best_overlap(pos_a_source : &[Sample], pos_a : isize, pos_b_source : &[S
     let mut best_energy = 0.0;
     let mut best_offset = 0;
     
-    let pass_count = 5;
+    let pass_count = 4;
     for pass in 1..=pass_count
     {
         let base_offset = best_offset;
@@ -165,7 +165,8 @@ fn find_best_overlap(pos_a_source : &[Sample], pos_a : isize, pos_b_source : &[S
             {
                 continue;
             }
-            let energy = calc_overlap_energy(pos_a_source, pos_a + offset, pos_b_source, pos_b, len);
+            let central_bias = window((i+subdiv) as f32 / (subdiv*2) as f32) + 2.0;
+            let energy = calc_overlap_energy(pos_a_source, pos_a + offset, pos_b_source, pos_b, len) * central_bias;
             if energy > best_energy
             {
                 best_energy = energy;
@@ -180,7 +181,7 @@ fn find_best_overlap(pos_a_source : &[Sample], pos_a : isize, pos_b_source : &[S
 fn do_timestretch(in_data : &[Sample], samplerate : f64, scale_length : f64, window_secs : f64, known_offsets : Option<&Vec<isize>>) -> (Vec<Sample>, Vec<isize>)
 {
     let window_size = ((samplerate * window_secs      ) as isize).max(4);
-    let search_dist = ((samplerate * window_secs / 2.5) as isize).min(window_size/2-1).max(0);
+    let search_dist = ((samplerate * window_secs / 4.0) as isize).min(window_size/2-1).max(0);
     
     let mut out_data = vec![Sample { l: 0.0, r: 0.0 }; (in_data.len() as f64 * scale_length as f64) as usize];
     let mut envelope = vec![0.0; out_data.len()];
@@ -295,9 +296,9 @@ fn do_freq_split(in_data : &[Sample], samplerate : f64, freq : f64) -> (Vec<Samp
 fn main() -> Result<(), hound::Error>
 {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() < 3
+    if args.len() < 4
     {
-        println!("usage: slipstretch input.wav output.wav");
+        println!("usage: slipstretch input.wav output.wav time_scale [full_spectrum_mode_window_size]");
         return Ok(());
     }
     
@@ -332,20 +333,20 @@ fn main() -> Result<(), hound::Error>
     
     let samplerate = reader.spec().sample_rate;
     
-    // FIXME take from command-line arguments
-    let time_factor = 1.1;
-    let do_multiband = true;
+    let time_factor = f64::from_str(&args[3]).unwrap_or_else(|x| panic!("third argument must be a number"));
+    let multiband_window_size = args.get(4).map(|x| f64::from_str(x).unwrap_or_else(|x| panic!("fourth argument must be a number"))).unwrap_or(0.0);
+    let do_multiband = multiband_window_size == 0.0;
     
     let output = if do_multiband
     {
         let window_secs_bass      = 0.2;
         let window_secs_mid       = 0.16;
         let window_secs_treble    = 0.08;
-        let window_secs_presence  = 0.01;
+        let window_secs_presence  = 0.005;
         
         let (bass, _temp)      = do_freq_split(&in_data[..], samplerate as f64, 400.0);
         let (mid, _temp)       = do_freq_split(&_temp[..]  , samplerate as f64, 1600.0);
-        let (treble, presence) = do_freq_split(&_temp[..]  , samplerate as f64, 6400.0);
+        let (treble, presence) = do_freq_split(&_temp[..]  , samplerate as f64, 4800.0);
         
         println!("timestretching presence frequency band...");
         let (out_presence , presence_offs) = do_timestretch(&presence [..], samplerate as f64, time_factor, window_secs_presence, None);
@@ -368,9 +369,8 @@ fn main() -> Result<(), hound::Error>
     }
     else
     {
-        let window_secs = 0.2;
         println!("timestretching full-spectrum audio...");
-        let (out_raw, _) = do_timestretch(&in_data[..], samplerate as f64, time_factor, window_secs, None);
+        let (out_raw, _) = do_timestretch(&in_data[..], samplerate as f64, time_factor, multiband_window_size, None);
         out_raw
     };
     
