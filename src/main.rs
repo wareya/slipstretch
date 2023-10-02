@@ -43,12 +43,19 @@ fn find_best_overlap(search_subdiv : isize, search_pass_count : u32, pos_a_sourc
             {
                 continue;
             }
+            
+            // bias towards center
             let mut d = (i+search_subdiv) as f32 / (search_subdiv*2) as f32;
             d = d*2.0-1.0;
             d *= len as f32 / 5000.0;
             d *= i as f32 / p as f32;
+            let mut central_bias = window(d*0.5+0.5) + 2.0;
             
-            let central_bias = window(d*0.5+0.5) + 2.0;
+            if offset == 0 // bias slightly towards the exact zero offset
+            {
+                //central_bias += 1.0;
+            }
+            
             let energy = calc_overlap_energy(pos_a_source, pos_a + offset, pos_b_source, pos_b, len) * central_bias;
             if energy > best_energy
             {
@@ -121,25 +128,8 @@ fn main() -> Result<(), hound::Error>
     use clap::Parser;
     let mut args = Args::parse();
     
-    let mut reader = hound::WavReader::open(&args.in_file_name)?;
-    let sample_format = reader.spec().sample_format;
-
-    let in_data: Vec<f32> = match sample_format
-    {
-        hound::SampleFormat::Int => reader.samples::<i16>().map(|sample| sample.unwrap() as f32 / 32768.0).collect(),
-        hound::SampleFormat::Float => reader.samples::<f32>().map(|sample| sample.unwrap()).collect()
-    };
-
-    let mut in_data : Vec<Sample> = in_data
-        .chunks(reader.spec().channels.into())
-        .map(|chunk| match chunk.len()
-        {
-            2 => Sample { l: chunk[0], r: chunk[1] },
-            1 => Sample { l: chunk[0], r: chunk[0] },
-            count => panic!("unsupported audio channel count {} (only 1- and 2-channel audio supported)", count)
-        }).collect();
+    let (mut in_data, samplerate) = frontend_acquire_audio(&args);
     
-    let samplerate = reader.spec().sample_rate;
     let do_multiband = args.fullband_window_secs == 0.0;
     
     if args.pitch_scale < 1.0
@@ -186,23 +176,7 @@ fn main() -> Result<(), hound::Error>
         output = resample(&output[..], 1.0/args.pitch_scale);
     }
     
-    let out: Vec<_> = output.into_iter().flat_map(|sample| vec![sample.l, sample.r]).collect();
-
-    let spec = hound::WavSpec
-    {
-        channels: 2,
-        sample_rate: samplerate,
-        bits_per_sample: 32,
-        sample_format: hound::SampleFormat::Float,
-    };
-    let mut writer = hound::WavWriter::create(&args.out_file_name, spec)?;
-
-    for sample in out
-    {
-        writer.write_sample(sample)?;
-    }
-
-    println!("Audio data saved to {}", args.out_file_name);
+    frontend_save_audio(&args, &output[..], samplerate);
 
     Ok(())
 }

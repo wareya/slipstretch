@@ -3,10 +3,11 @@ use crate::sample::Sample;
 pub (crate) fn window(mut x : f32) -> f32
 {
     x = x*2.0 - 1.0;
-    x = x*x;
-    x = 1.0 - x * (2.0 - x);
-    x = 2.0 * (x * x) * (1.5 - x);
-    x
+    x *= x;
+    x = 1.0 - x;
+    let x2 = x*x;
+    let x3 = x2*x;
+    x2*0.56 + x3*0.44
 }
 pub (crate) fn generate_sinc_table(filter_size : usize, adjusted_freq : f32) -> Vec<f32>
 {
