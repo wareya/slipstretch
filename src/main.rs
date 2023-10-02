@@ -160,7 +160,7 @@ fn do_timestretch(in_data : &[Sample], samplerate : f64, scale_length : f64, win
     for i in 0..out_data.len() as isize/window_size*lapping
     {
         let chunk_pos_out = i*window_size/lapping;
-        let pure_offset = ((1.0 - 2.0_f64.powf(1.0 - scale_length)) * (window_size/2) as f64) as isize; // this is a guess
+        let pure_offset = ((1.0 - 2.0_f64.powf(1.0 - scale_length.powf((lapping - 1) as f64))) * (window_size/2) as f64) as isize; // this is a guess
         let chunk_pos_in = chunk_pos_out * in_data.len() as isize / out_data.len() as isize - pure_offset;
         
         let min_offs = known_offsets.map(|x| x[i as usize]).unwrap_or(-1000000);
