@@ -197,7 +197,7 @@ fn do_timestretch(in_data : &[Sample], samplerate : f64, scale_length : f64, win
 fn do_freq_split(in_data : &[Sample], samplerate : f64, freq : f64) -> (Vec<Sample>, Vec<Sample>)
 {
     let bandwidth_length = 1.0 / freq;
-    let filter_size_ms = bandwidth_length * 8.0; // 8.0 - filter bandwidth constant
+    let filter_size_ms = bandwidth_length * 4.0;
     let filter_size = ((samplerate * filter_size_ms) as usize).max(1);
     if filter_size % 2 == 0
     {
