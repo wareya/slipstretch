@@ -81,10 +81,6 @@ impl core::ops::DivAssign<f32> for Sample
     }
 }
 
-fn lerp(a : f32, b : f32, t : f32) -> f32
-{
-    a * (1.0 - t) + b * t
-}
 fn window(mut x : f32) -> f32
 {
     x = x*2.0 - 1.0;
