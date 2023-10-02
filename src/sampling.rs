@@ -57,15 +57,15 @@ pub (crate) fn resample(in_data : &[Sample], factor : f64) -> Vec<Sample>
 pub (crate) fn do_freq_split(in_data : &[Sample], samplerate : f64, cutoff_steepness : f64, freq : f64) -> (Vec<Sample>, Vec<Sample>)
 {
     let bandwidth_length = 1.0 / freq;
-    let filter_size_ms = bandwidth_length * cutoff_steepness;
-    let filter_size = ((samplerate * filter_size_ms) as usize).max(1);
+    let filter_size_s = bandwidth_length * cutoff_steepness;
+    let filter_size = ((samplerate * filter_size_s) as usize).max(1);
     if filter_size % 2 == 0
     {
-        println!("filter size ({}) is even. building sinc table", filter_size);
+        println!("filter size ({}, around {}ms) is even. building sinc table", filter_size, filter_size_s*1000.0);
     }
     else
     {
-        println!("filter size ({}) is NOT even (is odd). building sinc table", filter_size);
+        println!("filter size ({}, around {}ms) is NOT even (is odd). building sinc table", filter_size, filter_size_s*1000.0);
     }
     
     let adjusted_freq = (freq * 2.0 / samplerate) as f32;

@@ -26,7 +26,7 @@ pub (crate) struct Args {
     /// Recommendation: Leave at default, or set to lower than default if you're having bad flam or tempo shifting artifacts.
     /// Higher values will have more flam/tempo shifting artifacts. Lower values will have more phasing artifacts.
     /// Maximum: 0.5.
-    #[arg(short = 's', long, verbatim_doc_comment, default_value_t=0.25)]
+    #[arg(short = 'r', long, verbatim_doc_comment, default_value_t=0.25)]
     pub (crate) slip_range: f64,
 
     /// Window size for full-band pitch shifting, in seconds.
