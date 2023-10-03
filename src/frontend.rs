@@ -74,21 +74,48 @@ pub (crate) struct Args {
     /// The steepness of the filter that separates each frequency bands.
     /// The filter is a windowed sinc filter, not an IIR filter.
     /// This value is proportional to (but not equal to) the number of lobes present in the windowed sinc kernel.
+    /// NOTE: If specified, overrides filter length.
+    /// Using cutoff steepness makes higher frequency bands process with a smaller, faster filter than lower frequency bands.
+    /// This can make things faster, but brings the risk of introducing more energy loss at higher cutoff frequencies.
+    /// That risk of energy loss is especially true if combined energy estimation is disabled.
+    /// Recommended: between 4.0 and 8.0
+    #[arg(long, verbatim_doc_comment, default_value_t=0.0)]
+    pub (crate) cutoff_steepness : f64,
+    
+    /// The length of the filter that separates each frequency bands, in seconds.
+    /// The filter is a windowed sinc filter, not an IIR filter.
     /// Higher values are slower, because a larger filter must be used.
     /// Lower values have more phasing/notching artifacts where the frequency bands cross.
     /// Extremely high values will produce pre-ringing artifacts on sharp transients, in addition to being extremely slow.
-    #[arg(long, verbatim_doc_comment, default_value_t=8.0)]
-    pub (crate) cutoff_steepness : f64,
+    /// Recommended: between 0.02 and 0.002
+    #[arg(long, verbatim_doc_comment, default_value_t=0.01)]
+    pub (crate) filter_length : f64,
     
     /// Whether to do a combined energy estimation (i.e. including the higher-frequency bands) when doing chunk sliding or not.
-    /// When false, you might have long periods of obvious phase interference between frequency bands, especially if cutoff steepness is low.
-    /// When true, you might have moments of temporary energy loss in mid frequencies after transients.
-    #[arg(long, verbatim_doc_comment, default_value_t=false, action = clap::ArgAction::Set)]
+    /// When false, you might have periods of obvious phase interference between frequency bands, especially if cutoff steepness is low.
+    /// When true, you might have moments of slight, temporary energy loss in mid frequencies after transients.
+    #[arg(long, verbatim_doc_comment, default_value_t=true, action = clap::ArgAction::Set)]
     pub (crate) combined_energy_estimation : bool,
     
     /// Whether to offset frequency bands in a way that attempts to prevent transients from sounding "wet".
     #[arg(long, verbatim_doc_comment, default_value_t=true, action = clap::ArgAction::Set)]
     pub (crate) smart_band_offset : bool,
+    
+    /// Amplitude of the bass frequency band.
+    #[arg(long, default_value_t=1.0)]
+    pub (crate) amplitude_bass : f64,
+    
+    /// Amplitude of the mid frequency band.
+    #[arg(long, default_value_t=1.0)]
+    pub (crate) amplitude_mid : f64,
+    
+    /// Amplitude of the treble frequency band.
+    #[arg(long, default_value_t=1.0)]
+    pub (crate) amplitude_treble : f64,
+    
+    /// Amplitude of the presence frequency band.
+    #[arg(long, default_value_t=1.0)]
+    pub (crate) amplitude_presence : f64,
 }
 
 pub (crate) fn frontend_acquire_audio(args : &Args) -> (Vec<Sample>, f64)
