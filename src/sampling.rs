@@ -2,6 +2,7 @@ use crate::sample::Sample;
 
 pub (crate) fn window(mut x : f32) -> f32
 {
+    // This is a Welch window, squared and cubed, then interpolated between the squared and cubed copies such that the x=0.25 and x=0.75 points are slightly above 0.5.
     x = x*2.0 - 1.0;
     x *= x;
     x = 1.0 - x;
