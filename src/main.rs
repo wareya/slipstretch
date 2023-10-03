@@ -5,6 +5,7 @@ use sampling::*;
 mod frontend;
 use frontend::*;
 
+#[derive(Clone, Debug)]
 pub (crate) struct SlipStreamArgs {
     pub (crate) length_scale: f64,
     pub (crate) pitch_scale: f64,
@@ -146,7 +147,7 @@ fn do_timestretch(in_data : &[Sample], out_data : &mut Vec<Sample>, samplerate :
         // this is a guess
         let mut smart_offset = if args.smart_band_offset { ((1.0 - 2.0_f64.powf(1.0 - length_scale.powf((raw_lapping - 1) as f64))) * (window_size*2/3) as f64) as isize } else { 0 };
         
-        let min_fadein = (args.length_scale.max(1.0) * 4.0).floor() as isize;
+        let min_fadein = (args.length_scale.max(1.0) * 2.0).floor() as isize;
         smart_offset = smart_offset * i.min(min_fadein) / min_fadein; // the smart offset has to fade in or else the first split second of audio can sound wet
         let chunk_pos_in = chunk_pos_out * in_data.len() as isize / out_data.len() as isize - smart_offset;
         
@@ -202,21 +203,17 @@ fn do_timestretch(in_data : &[Sample], out_data : &mut Vec<Sample>, samplerate :
     offsets
 }
 
-
-fn main() -> Result<(), hound::Error>
+fn run_slipstretch(samples : &[Sample], samplerate : f64, mut args : SlipStreamArgs) -> Vec<Sample>
 {
-    use clap::Parser;
-    let clap_args = Args::parse();
-    let mut args = clap_args.to_slipstream_args();
-    
-    let (mut in_data, samplerate) = frontend_acquire_audio(&clap_args);
-    
     let do_multiband = args.fullband_window_secs == 0.0;
     
+    let mut in_data = samples;
+    let mut _dummy = Vec::new();
     if args.pitch_scale < 1.0
     {
         println!("pre-resampling audio for pitch stretching...");
-        in_data = resample(&in_data[..], 1.0/args.pitch_scale);
+        _dummy = resample(&in_data[..], 1.0/args.pitch_scale);
+        in_data = &_dummy[..];
     }
     args.length_scale *= args.pitch_scale;
     
@@ -237,9 +234,9 @@ fn main() -> Result<(), hound::Error>
                     1.0 / cutoff * args.cutoff_steepness
                 }
             }.max(0.001);
-            let (bass, _temp)      = do_freq_split(&in_data[..], samplerate as f64, get_filter_length(args.cutoff_bass_mid       ), args.cutoff_bass_mid);
-            let (mid, _temp)       = do_freq_split(&_temp[..]  , samplerate as f64, get_filter_length(args.cutoff_mid_treble     ), args.cutoff_mid_treble);
-            let (treble, presence) = do_freq_split(&_temp[..]  , samplerate as f64, get_filter_length(args.cutoff_treble_presence), args.cutoff_treble_presence);
+            let (bass, _temp)      = do_freq_split(&in_data[..], samplerate, get_filter_length(args.cutoff_bass_mid       ), args.cutoff_bass_mid);
+            let (mid, _temp)       = do_freq_split(&_temp[..]  , samplerate, get_filter_length(args.cutoff_mid_treble     ), args.cutoff_mid_treble);
+            let (treble, presence) = do_freq_split(&_temp[..]  , samplerate, get_filter_length(args.cutoff_treble_presence), args.cutoff_treble_presence);
             
             if args.combined_energy_estimation
             {
@@ -247,13 +244,13 @@ fn main() -> Result<(), hound::Error>
                 
                 let mut out_data = vec![Sample { l: 0.0, r: 0.0 }; out_len];
                 println!("timestretching presence frequency band...");
-                let presence_offs = do_timestretch(&presence [..], &mut out_data, samplerate as f64, &args, 0, args.window_secs_presence, None);
+                let presence_offs = do_timestretch(&presence [..], &mut out_data, samplerate, &args, 0, args.window_secs_presence, None);
                 println!("timestretching treble frequency band...");
-                let treble_offs   = do_timestretch(&treble   [..], &mut out_data, samplerate as f64, &args, 1, args.window_secs_treble, Some(&presence_offs));
+                let treble_offs   = do_timestretch(&treble   [..], &mut out_data, samplerate, &args, 1, args.window_secs_treble, Some(&presence_offs));
                 println!("timestretching mid frequency band...");
-                let mid_offs      = do_timestretch(&mid      [..], &mut out_data, samplerate as f64, &args, 2, args.window_secs_mid, Some(&treble_offs));
+                let mid_offs      = do_timestretch(&mid      [..], &mut out_data, samplerate, &args, 2, args.window_secs_mid, Some(&treble_offs));
                 println!("timestretching bass frequency band...");
-                let _             = do_timestretch(&bass     [..], &mut out_data, samplerate as f64, &args, 3, args.window_secs_bass, Some(&mid_offs));
+                let _             = do_timestretch(&bass     [..], &mut out_data, samplerate, &args, 3, args.window_secs_bass, Some(&mid_offs));
                 out_data
             }
             else
@@ -262,16 +259,16 @@ fn main() -> Result<(), hound::Error>
                 
                 println!("timestretching presence frequency band...");
                 let mut out_presence = vec![Sample { l: 0.0, r: 0.0 }; out_len];
-                let presence_offs = do_timestretch(&presence [..], &mut out_presence, samplerate as f64, &args, 0, args.window_secs_presence, None);
+                let presence_offs = do_timestretch(&presence [..], &mut out_presence, samplerate, &args, 0, args.window_secs_presence, None);
                 println!("timestretching treble frequency band...");
                 let mut out_treble = vec![Sample { l: 0.0, r: 0.0 }; out_len];
-                let treble_offs   = do_timestretch(&treble   [..], &mut out_treble  , samplerate as f64, &args, 1, args.window_secs_treble, Some(&presence_offs));
+                let treble_offs   = do_timestretch(&treble   [..], &mut out_treble  , samplerate, &args, 1, args.window_secs_treble, Some(&presence_offs));
                 println!("timestretching mid frequency band...");
                 let mut out_mid = vec![Sample { l: 0.0, r: 0.0 }; out_len];
-                let mid_offs      = do_timestretch(&mid      [..], &mut out_mid     , samplerate as f64, &args, 2, args.window_secs_mid, Some(&treble_offs));
+                let mid_offs      = do_timestretch(&mid      [..], &mut out_mid     , samplerate, &args, 2, args.window_secs_mid, Some(&treble_offs));
                 println!("timestretching bass frequency band...");
                 let mut out_bass = vec![Sample { l: 0.0, r: 0.0 }; out_len];
-                let _             = do_timestretch(&bass     [..], &mut out_bass    , samplerate as f64, &args, 3, args.window_secs_bass, Some(&mid_offs));
+                let _             = do_timestretch(&bass     [..], &mut out_bass    , samplerate, &args, 3, args.window_secs_bass, Some(&mid_offs));
                 
                 for (i, val) in out_bass.iter_mut().enumerate()
                 {
@@ -287,19 +284,31 @@ fn main() -> Result<(), hound::Error>
         {
             println!("timestretching full-spectrum audio...");
             let mut out_data = vec![Sample { l: 0.0, r: 0.0 }; out_len];
-            do_timestretch(&in_data[..], &mut out_data, samplerate as f64, &args, -1, args.fullband_window_secs, None);
+            do_timestretch(&in_data[..], &mut out_data, samplerate, &args, -1, args.fullband_window_secs, None);
             out_data
         }
     }
     else
     {
-        in_data.clone()
+        in_data.iter().map(|x| *x).collect::<_>()
     };
     if args.pitch_scale > 1.0
     {
         println!("post-resampling audio for pitch stretching...");
         out_data = resample(&out_data[..], 1.0/args.pitch_scale);
     }
+    out_data
+}
+
+fn main() -> Result<(), hound::Error>
+{
+    use clap::Parser;
+    let clap_args = Args::parse();
+    let mut args = clap_args.to_slipstream_args();
+    
+    let (in_data, samplerate) = frontend_acquire_audio(&clap_args);
+    
+    let out_data = run_slipstretch(&in_data, samplerate as f64, args);
     
     frontend_save_audio(&clap_args, &out_data[..], samplerate);
 

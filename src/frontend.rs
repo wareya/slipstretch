@@ -2,7 +2,7 @@ use clap::Parser;
 use crate::sample::Sample;
 
 /// An audio stretcher.
-#[derive(Debug, Parser)]
+#[derive(Clone, Debug, Parser)]
 pub (crate) struct Args {
     /// Input wav filename.
     pub (crate) in_file_name: String,
