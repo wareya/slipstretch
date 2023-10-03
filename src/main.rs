@@ -124,7 +124,7 @@ fn find_best_overlap(search_subdiv : isize, search_pass_count : u32, pos_a_sourc
         {
             let p = search_subdiv.pow(pass);
             let offset = range*i/p as isize + base_offset;
-            //if offset < min_offs
+            if offset < min_offs
             {
                 continue;
             }
@@ -199,8 +199,21 @@ fn do_timestretch(in_data : &[Sample], out_data : &mut Vec<Sample>, samplerate :
         if let Some(known) = known_offsets
         {
             let _i = known.binary_search_by(|pair| pair.0.cmp(&chunk_pos_out));
-            let i = _i.unwrap_or_else(|_i| _i);
-            min_offs = known[i].1;
+            if let Ok(i) = _i
+            {
+                min_offs = known[i].1;
+            }
+            else if let Err(i) = _i
+            {
+                if i > 0
+                {
+                    min_offs = known[i].1;
+                    if i+1 < known.len()
+                    {
+                        min_offs = min_offs.max(known[i+1].1);
+                    }
+                }
+            }
         }
         let mut offs = 0;
         if i > 0
