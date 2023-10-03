@@ -59,6 +59,13 @@ pub (crate) struct Args {
     #[arg(long, default_value_t=0.008)]
     pub (crate) window_secs_presence : f64,
     
+    /// The minimum number of overlapping chunks under each output sample, before doing chunk realignment.
+    /// Large values give less throbbing/warbling in return for worse performance and a risk of more phasing effects.
+    /// Recommended: 2 (for scales close to 1.0), 3 or 4 (for scales not close to 1.0).
+    /// Minimum: 2.
+    #[arg(long, verbatim_doc_comment, default_value_t=2)]
+    pub (crate) window_minimum_lapping: isize,
+    
     /// For multiband mode, the cutoff frequency between the bass and mid frequency bands.
     #[arg(long, default_value_t=400.0)]
     pub (crate) cutoff_bass_mid : f64,
@@ -114,6 +121,48 @@ pub (crate) struct Args {
     /// Amplitude of the presence frequency band.
     #[arg(long, default_value_t=1.0)]
     pub (crate) amplitude_presence : f64,
+}
+
+use crate::SlipStreamArgs;
+impl Args {
+    pub (crate) fn to_slipstream_args(&self) -> SlipStreamArgs
+    {
+        SlipStreamArgs
+        {
+            length_scale: self.length_scale,
+            pitch_scale: self.pitch_scale,
+
+            slip_range: self.slip_range,
+
+            fullband_window_secs: self.fullband_window_secs,
+
+            search_subdiv: self.search_subdiv,
+            search_pass_count: self.search_pass_count,
+            
+            window_minimum_lapping : self.window_minimum_lapping,
+            
+            window_secs_bass : self.window_secs_bass,
+            window_secs_mid : self.window_secs_mid,
+            window_secs_treble : self.window_secs_treble,
+            window_secs_presence : self.window_secs_presence,
+            
+            cutoff_bass_mid : self.cutoff_bass_mid,
+            cutoff_mid_treble : self.cutoff_mid_treble,
+            cutoff_treble_presence : self.cutoff_treble_presence,
+            
+            cutoff_steepness : self.cutoff_steepness,
+            filter_length : self.filter_length,
+            
+            combined_energy_estimation : self.combined_energy_estimation,
+            
+            smart_band_offset : self.smart_band_offset,
+            
+            amplitude_bass : self.amplitude_bass,
+            amplitude_mid : self.amplitude_mid,
+            amplitude_treble : self.amplitude_treble,
+            amplitude_presence : self.amplitude_presence,
+        }
+    }
 }
 
 pub (crate) fn frontend_acquire_audio(args : &Args) -> (Vec<Sample>, f64)

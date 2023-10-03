@@ -6,90 +6,40 @@ mod frontend;
 use frontend::*;
 
 pub (crate) struct SlipStreamArgs {
-    /// Length scale. A value of 0.5 makes the audio play twice as fast.
-    /// To convert a 120bpm song to 140bpm, you would run 120/140 through a calculator and use that value.
     pub (crate) length_scale: f64,
-
-    /// Pitch scale. A value of 0.5 makes the audio be pitched down by an octave.
-    /// To pitch shift by semitones, run 2^(<semitones>/12) through a calculator and use that value.
     pub (crate) pitch_scale: f64,
 
-    /// The range in which the shifting stage of the algorithm is allowed to try to shift each window to reduce phasing artifacts.
-    /// Recommendation: Leave at default, or set to lower than default if you're having bad flam or tempo shifting artifacts.
-    /// Higher values will have more flam/tempo shifting artifacts. Lower values will have more phasing artifacts.
-    /// Maximum: 0.5.
     pub (crate) slip_range: f64,
 
-    /// Window size for full-band pitch shifting, in seconds.
-    /// This causes the algorithm to run without splitting the audio up into multiple frequency bands first.
-    /// If unset, the algorithm will run on frequency bands instead, which is better for most types of audio.
-    /// Useful values range from 0.2 to 0.01, depending on the audio.
-    /// 0.08 works decently for speech.
-    /// 0.2 works for music but you should leave this unset for music and let it do multiband mode for music.
-    /// Recommendation: Do not use. Leave unset.
     pub (crate) fullband_window_secs: f64,
 
-    /// Number of times to subdivide the slip range in each direction when searching for good chunk alignment.
     pub (crate) search_subdiv: isize,
-    
-    /// Number of increasingly subdivided search passes to do when searching for good chunk alignment.
     pub (crate) search_pass_count: u32,
     
-    /// In multiband mode (the default mode), the chunk window size (in seconds) used when stretching the bass frequency band.
-    /// Smaller chunk window sizes give better time-domain but worse frequency-domain results.
     pub (crate) window_secs_bass : f64,
-    /// In multiband mode, the chunk window size used when stretching the mid frequency band.
     pub (crate) window_secs_mid : f64,
-    /// In multiband mode, the chunk window size used when stretching the treble frequency band.
     pub (crate) window_secs_treble : f64,
-    /// In multiband mode, the chunk window size used when stretching the presence frequency band.
     pub (crate) window_secs_presence : f64,
     
-    /// For multiband mode, the cutoff frequency between the bass and mid frequency bands.
+    pub (crate) window_minimum_lapping : isize,
+    
     pub (crate) cutoff_bass_mid : f64,
-    /// For multiband mode, the cutoff frequency between the mid and treble frequency bands.
     pub (crate) cutoff_mid_treble : f64,
-    /// For multiband mode, the cutoff frequency between the treble and presence frequency bands.
     pub (crate) cutoff_treble_presence : f64,
     
-    /// The steepness of the filter that separates each frequency bands.
-    /// The filter is a windowed sinc filter, not an IIR filter.
-    /// This value is proportional to (but not equal to) the number of lobes present in the windowed sinc kernel.
-    /// Using cutoff steepness makes higher frequency bands process with a smaller, faster filter than lower frequency bands.
-    /// This can make things faster, but brings the risk of introducing more energy loss at higher cutoff frequencies.
-    /// That risk of energy loss is especially true if combined energy estimation is disabled.
-    /// Recommended: between 4.0 and 8.0
     pub (crate) cutoff_steepness : f64,
-    
-    /// The length of the filter that separates each frequency bands, in seconds.
-    /// The filter is a windowed sinc filter, not an IIR filter.
-    /// Higher values are slower, because a larger filter must be used.
-    /// Lower values have more phasing/notching artifacts where the frequency bands cross.
-    /// Extremely high values will produce pre-ringing artifacts on sharp transients, in addition to being extremely slow.
-    /// NOTE: If specified, overrides cutoff steepness.
-    /// Recommended: between 0.02 and 0.002
     pub (crate) filter_length : f64,
     
-    /// Whether to do a combined energy estimation (i.e. including the higher-frequency bands) when doing chunk sliding or not.
-    /// When false, you might have periods of obvious phase interference between frequency bands, especially if cutoff steepness is low.
-    /// When true, you might have moments of slight, temporary energy loss in mid frequencies after transients.
     pub (crate) combined_energy_estimation : bool,
     
-    /// Whether to offset frequency bands in a way that attempts to prevent transients from sounding "wet".
     pub (crate) smart_band_offset : bool,
     
-    /// Amplitude of the bass frequency band.
     pub (crate) amplitude_bass : f64,
-    
-    /// Amplitude of the mid frequency band.
     pub (crate) amplitude_mid : f64,
-    
-    /// Amplitude of the treble frequency band.
     pub (crate) amplitude_treble : f64,
-    
-    /// Amplitude of the presence frequency band.
     pub (crate) amplitude_presence : f64,
 }
+
 fn calc_overlap_energy(pos_a_source : &[Sample], pos_a : isize, pos_b_source : &[Sample], pos_b : isize, len : isize) -> f32
 {
     let mut energy = 0.0;
@@ -152,7 +102,7 @@ fn find_best_overlap(search_subdiv : isize, search_pass_count : u32, pos_a_sourc
     best_offset
 }
 
-fn do_timestretch(in_data : &[Sample], out_data : &mut Vec<Sample>, samplerate : f64, args : &Args, which_pass : i32, window_secs : f64, known_offsets : Option<&Vec<(isize, isize)>>) -> Vec<(isize, isize)>
+fn do_timestretch(in_data : &[Sample], out_data : &mut Vec<Sample>, samplerate : f64, args : &SlipStreamArgs, which_pass : i32, window_secs : f64, known_offsets : Option<&Vec<(isize, isize)>>) -> Vec<(isize, isize)>
 {
     let slip_range = args.slip_range.min(0.5);
     let length_scale = args.length_scale;
@@ -175,6 +125,8 @@ fn do_timestretch(in_data : &[Sample], out_data : &mut Vec<Sample>, samplerate :
     {
         lapping = lapping.max((2.0 / length_scale.min(1.0)).ceil() as isize);
     }
+    let raw_lapping = lapping;
+    lapping = lapping.max(args.window_minimum_lapping);
     println!("lapping: {}", lapping);
     
     let amp = match which_pass
@@ -192,7 +144,7 @@ fn do_timestretch(in_data : &[Sample], out_data : &mut Vec<Sample>, samplerate :
         let chunk_pos_out = i*window_size/lapping;
         
         // this is a guess
-        let mut smart_offset = if args.smart_band_offset { ((1.0 - 2.0_f64.powf(1.0 - length_scale.powf((lapping - 1) as f64))) * (window_size/2) as f64) as isize } else { 0 };
+        let mut smart_offset = if args.smart_band_offset { ((1.0 - 2.0_f64.powf(1.0 - length_scale.powf((raw_lapping - 1) as f64))) * (window_size*2/3) as f64) as isize } else { 0 };
         
         let min_fadein = (args.length_scale.max(1.0) * 4.0).floor() as isize;
         smart_offset = smart_offset * i.min(min_fadein) / min_fadein; // the smart offset has to fade in or else the first split second of audio can sound wet
@@ -210,10 +162,10 @@ fn do_timestretch(in_data : &[Sample], out_data : &mut Vec<Sample>, samplerate :
             {
                 if i > 0
                 {
-                    min_offs = known[i].1;
-                    if i+1 < known.len()
+                    min_offs = known[i-1].1;
+                    if i < known.len()
                     {
-                        min_offs = min_offs.max(known[i+1].1);
+                        min_offs = min_offs.max(known[i].1);
                     }
                 }
             }
@@ -254,9 +206,10 @@ fn do_timestretch(in_data : &[Sample], out_data : &mut Vec<Sample>, samplerate :
 fn main() -> Result<(), hound::Error>
 {
     use clap::Parser;
-    let mut args = Args::parse();
+    let clap_args = Args::parse();
+    let mut args = clap_args.to_slipstream_args();
     
-    let (mut in_data, samplerate) = frontend_acquire_audio(&args);
+    let (mut in_data, samplerate) = frontend_acquire_audio(&clap_args);
     
     let do_multiband = args.fullband_window_secs == 0.0;
     
@@ -348,7 +301,7 @@ fn main() -> Result<(), hound::Error>
         out_data = resample(&out_data[..], 1.0/args.pitch_scale);
     }
     
-    frontend_save_audio(&args, &out_data[..], samplerate);
+    frontend_save_audio(&clap_args, &out_data[..], samplerate);
 
     Ok(())
 }
