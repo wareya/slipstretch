@@ -29,7 +29,7 @@ pub (crate) fn generate_sinc_table(filter_size : usize, adjusted_freq : f32) -> 
     println!("filter energy: {}. normalizing.", energy);
     sinc_table
 }
-pub (crate) fn interpolate(table : &[f32], i : usize, t : f32) -> f32
+pub (crate) fn interpolate_kernel(table : &[f32], i : usize, t : f32) -> f32
 {
     let a = table[i%table.len()];
     let b = table[(i+1)%table.len()];
@@ -56,7 +56,6 @@ pub (crate) fn resample(in_data : &[Sample], factor : f64) -> Vec<Sample>
 
 pub (crate) fn do_freq_split(in_data : &[Sample], samplerate : f64, filter_size_s : f64, freq : f64) -> (Vec<Sample>, Vec<Sample>)
 {
-    let bandwidth_length = 1.0 / freq;
     let filter_size = ((samplerate * filter_size_s) as usize).max(1);
     if filter_size % 2 == 0
     {

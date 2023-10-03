@@ -1,6 +1,4 @@
 use clap::Parser;
-use std::path::PathBuf;
-
 use crate::sample::Sample;
 
 /// An audio stretcher.
@@ -74,12 +72,11 @@ pub (crate) struct Args {
     /// The steepness of the filter that separates each frequency bands.
     /// The filter is a windowed sinc filter, not an IIR filter.
     /// This value is proportional to (but not equal to) the number of lobes present in the windowed sinc kernel.
-    /// NOTE: If specified, overrides filter length.
     /// Using cutoff steepness makes higher frequency bands process with a smaller, faster filter than lower frequency bands.
     /// This can make things faster, but brings the risk of introducing more energy loss at higher cutoff frequencies.
     /// That risk of energy loss is especially true if combined energy estimation is disabled.
     /// Recommended: between 4.0 and 8.0
-    #[arg(long, verbatim_doc_comment, default_value_t=0.0)]
+    #[arg(long, verbatim_doc_comment, default_value_t=8.0)]
     pub (crate) cutoff_steepness : f64,
     
     /// The length of the filter that separates each frequency bands, in seconds.
@@ -87,8 +84,9 @@ pub (crate) struct Args {
     /// Higher values are slower, because a larger filter must be used.
     /// Lower values have more phasing/notching artifacts where the frequency bands cross.
     /// Extremely high values will produce pre-ringing artifacts on sharp transients, in addition to being extremely slow.
+    /// NOTE: If specified, overrides cutoff steepness.
     /// Recommended: between 0.02 and 0.002
-    #[arg(long, verbatim_doc_comment, default_value_t=0.01)]
+    #[arg(long, verbatim_doc_comment, default_value_t=0.0)]
     pub (crate) filter_length : f64,
     
     /// Whether to do a combined energy estimation (i.e. including the higher-frequency bands) when doing chunk sliding or not.
@@ -129,7 +127,7 @@ pub (crate) fn frontend_acquire_audio(args : &Args) -> (Vec<Sample>, f64)
         _ => panic!("unsupported audio format (only 16-bit int and 32-bit float wav files are supported)")
     };
 
-    let mut in_data : Vec<Sample> = in_data
+    let in_data : Vec<Sample> = in_data
         .chunks(reader.spec().channels.into())
         .map(|chunk| match chunk.len()
         {

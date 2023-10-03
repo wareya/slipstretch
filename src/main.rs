@@ -71,8 +71,8 @@ fn do_timestretch(in_data : &[Sample], out_data : &mut Vec<Sample>, samplerate :
 {
     let slip_range = args.slip_range.min(0.5);
     let length_scale = args.length_scale;
-    let window_size = ((samplerate * window_secs                  ) as isize).max(4);
-    let search_dist = ((samplerate * window_secs * args.slip_range) as isize).min(window_size/2-1).max(0);
+    let window_size = ((samplerate * window_secs             ) as isize).max(4);
+    let search_dist = ((samplerate * window_secs * slip_range) as isize).min(window_size/2-1).max(0);
     
     let out_len = (in_data.len() as f64 * length_scale as f64) as usize;
     assert!(out_data.len() == (in_data.len() as f64 * length_scale as f64) as usize);
@@ -165,15 +165,15 @@ fn main() -> Result<(), hound::Error>
     {
         let get_filter_length = |cutoff|
         {
-            if args.cutoff_steepness != 0.0
-            {
-                1.0 / cutoff * args.cutoff_steepness
-            }
-            else
+            if args.filter_length != 0.0
             {
                 args.filter_length
             }
-        };
+            else
+            {
+                1.0 / cutoff * args.cutoff_steepness
+            }
+        }.max(0.001);
         let (bass, _temp)      = do_freq_split(&in_data[..], samplerate as f64, get_filter_length(args.cutoff_bass_mid       ), args.cutoff_bass_mid);
         let (mid, _temp)       = do_freq_split(&_temp[..]  , samplerate as f64, get_filter_length(args.cutoff_mid_treble     ), args.cutoff_mid_treble);
         let (treble, presence) = do_freq_split(&_temp[..]  , samplerate as f64, get_filter_length(args.cutoff_treble_presence), args.cutoff_treble_presence);
