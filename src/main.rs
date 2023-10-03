@@ -190,7 +190,10 @@ fn do_timestretch(in_data : &[Sample], out_data : &mut Vec<Sample>, samplerate :
     for i in 0..out_data.len() as isize/window_size*lapping
     {
         let chunk_pos_out = i*window_size/lapping;
-        let mut smart_offset = if args.smart_band_offset { ((1.0 - 2.0_f64.powf(1.0 - length_scale.powf((lapping - 1) as f64))) * (window_size/2) as f64) as isize } else { 0 }; // this is a guess
+        
+        // this is a guess
+        let mut smart_offset = if args.smart_band_offset { ((1.0 - 2.0_f64.powf(1.0 - length_scale.powf((lapping - 1) as f64))) * (window_size/2) as f64) as isize } else { 0 };
+        
         let min_fadein = (args.length_scale.max(1.0) * 4.0).floor() as isize;
         smart_offset = smart_offset * i.min(min_fadein) / min_fadein; // the smart offset has to fade in or else the first split second of audio can sound wet
         let chunk_pos_in = chunk_pos_out * in_data.len() as isize / out_data.len() as isize - smart_offset;
