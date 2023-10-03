@@ -161,71 +161,78 @@ fn main() -> Result<(), hound::Error>
     
     let out_len = (in_data.len() as f64 * args.length_scale as f64) as usize;
     
-    let mut out_data = if do_multiband
+    let mut out_data = if (args.length_scale - 1.0).abs() > 0.00001
     {
-        let get_filter_length = |cutoff|
+        if do_multiband
         {
-            if args.filter_length != 0.0
+            let get_filter_length = |cutoff|
             {
-                args.filter_length
+                if args.filter_length != 0.0
+                {
+                    args.filter_length
+                }
+                else
+                {
+                    1.0 / cutoff * args.cutoff_steepness
+                }
+            }.max(0.001);
+            let (bass, _temp)      = do_freq_split(&in_data[..], samplerate as f64, get_filter_length(args.cutoff_bass_mid       ), args.cutoff_bass_mid);
+            let (mid, _temp)       = do_freq_split(&_temp[..]  , samplerate as f64, get_filter_length(args.cutoff_mid_treble     ), args.cutoff_mid_treble);
+            let (treble, presence) = do_freq_split(&_temp[..]  , samplerate as f64, get_filter_length(args.cutoff_treble_presence), args.cutoff_treble_presence);
+            
+            if args.combined_energy_estimation
+            {
+                println!("using combined energy estimation");
+                
+                let mut out_data = vec![Sample { l: 0.0, r: 0.0 }; out_len];
+                println!("timestretching presence frequency band...");
+                let presence_offs = do_timestretch(&presence [..], &mut out_data, samplerate as f64, &args, 0, args.window_secs_presence, None);
+                println!("timestretching treble frequency band...");
+                let treble_offs   = do_timestretch(&treble   [..], &mut out_data, samplerate as f64, &args, 1, args.window_secs_treble, Some(&presence_offs));
+                println!("timestretching mid frequency band...");
+                let mid_offs      = do_timestretch(&mid      [..], &mut out_data, samplerate as f64, &args, 2, args.window_secs_mid, Some(&treble_offs));
+                println!("timestretching bass frequency band...");
+                let _             = do_timestretch(&bass     [..], &mut out_data, samplerate as f64, &args, 3, args.window_secs_bass, Some(&mid_offs));
+                out_data
             }
             else
             {
-                1.0 / cutoff * args.cutoff_steepness
-            }
-        }.max(0.001);
-        let (bass, _temp)      = do_freq_split(&in_data[..], samplerate as f64, get_filter_length(args.cutoff_bass_mid       ), args.cutoff_bass_mid);
-        let (mid, _temp)       = do_freq_split(&_temp[..]  , samplerate as f64, get_filter_length(args.cutoff_mid_treble     ), args.cutoff_mid_treble);
-        let (treble, presence) = do_freq_split(&_temp[..]  , samplerate as f64, get_filter_length(args.cutoff_treble_presence), args.cutoff_treble_presence);
+                println!("using independent energy estimation");
+                
+                println!("timestretching presence frequency band...");
+                let mut out_presence = vec![Sample { l: 0.0, r: 0.0 }; out_len];
+                let presence_offs = do_timestretch(&presence [..], &mut out_presence, samplerate as f64, &args, 0, args.window_secs_presence, None);
+                println!("timestretching treble frequency band...");
+                let mut out_treble = vec![Sample { l: 0.0, r: 0.0 }; out_len];
+                let treble_offs   = do_timestretch(&treble   [..], &mut out_treble  , samplerate as f64, &args, 1, args.window_secs_treble, Some(&presence_offs));
+                println!("timestretching mid frequency band...");
+                let mut out_mid = vec![Sample { l: 0.0, r: 0.0 }; out_len];
+                let mid_offs      = do_timestretch(&mid      [..], &mut out_mid     , samplerate as f64, &args, 2, args.window_secs_mid, Some(&treble_offs));
+                println!("timestretching bass frequency band...");
+                let mut out_bass = vec![Sample { l: 0.0, r: 0.0 }; out_len];
+                let _             = do_timestretch(&bass     [..], &mut out_bass    , samplerate as f64, &args, 3, args.window_secs_bass, Some(&mid_offs));
+                
+                for (i, val) in out_bass.iter_mut().enumerate()
+                {
+                    *val += out_mid[i];
+                    *val += out_treble[i];
+                    *val += out_presence[i];
+                }
         
-        if args.combined_energy_estimation
-        {
-            println!("using combined energy estimation");
-            
-            let mut out_data = vec![Sample { l: 0.0, r: 0.0 }; out_len];
-            println!("timestretching presence frequency band...");
-            let presence_offs = do_timestretch(&presence [..], &mut out_data, samplerate as f64, &args, 0, args.window_secs_presence, None);
-            println!("timestretching treble frequency band...");
-            let treble_offs   = do_timestretch(&treble   [..], &mut out_data, samplerate as f64, &args, 1, args.window_secs_treble, Some(&presence_offs));
-            println!("timestretching mid frequency band...");
-            let mid_offs      = do_timestretch(&mid      [..], &mut out_data, samplerate as f64, &args, 2, args.window_secs_mid, Some(&treble_offs));
-            println!("timestretching bass frequency band...");
-            let _             = do_timestretch(&bass     [..], &mut out_data, samplerate as f64, &args, 3, args.window_secs_bass, Some(&mid_offs));
-            out_data
+                out_bass
+            }
         }
         else
         {
-            println!("using independent energy estimation");
-            
-            println!("timestretching presence frequency band...");
-            let mut out_presence = vec![Sample { l: 0.0, r: 0.0 }; out_len];
-            let presence_offs = do_timestretch(&presence [..], &mut out_presence, samplerate as f64, &args, 0, args.window_secs_presence, None);
-            println!("timestretching treble frequency band...");
-            let mut out_treble = vec![Sample { l: 0.0, r: 0.0 }; out_len];
-            let treble_offs   = do_timestretch(&treble   [..], &mut out_treble  , samplerate as f64, &args, 1, args.window_secs_treble, Some(&presence_offs));
-            println!("timestretching mid frequency band...");
-            let mut out_mid = vec![Sample { l: 0.0, r: 0.0 }; out_len];
-            let mid_offs      = do_timestretch(&mid      [..], &mut out_mid     , samplerate as f64, &args, 2, args.window_secs_mid, Some(&treble_offs));
-            println!("timestretching bass frequency band...");
-            let mut out_bass = vec![Sample { l: 0.0, r: 0.0 }; out_len];
-            let _             = do_timestretch(&bass     [..], &mut out_bass    , samplerate as f64, &args, 3, args.window_secs_bass, Some(&mid_offs));
-            
-            for (i, val) in out_bass.iter_mut().enumerate()
-            {
-                *val += out_mid[i];
-                *val += out_treble[i];
-                *val += out_presence[i];
-            }
-    
-            out_bass
+            println!("timestretching full-spectrum audio...");
+            let mut out_data = vec![Sample { l: 0.0, r: 0.0 }; out_len];
+            do_timestretch(&in_data[..], &mut out_data, samplerate as f64, &args, -1, args.fullband_window_secs, None);
+            out_data
         }
     }
     else
     {
-        println!("timestretching full-spectrum audio...");
-        let mut out_data = vec![Sample { l: 0.0, r: 0.0 }; out_len];
-        do_timestretch(&in_data[..], &mut out_data, samplerate as f64, &args, -1, args.fullband_window_secs, None);
-        out_data
+        in_data.clone()
     };
     if args.pitch_scale > 1.0
     {
