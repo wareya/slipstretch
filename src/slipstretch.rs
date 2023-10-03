@@ -81,7 +81,7 @@ fn find_best_overlap(search_subdiv : isize, search_pass_count : u32, pos_a_sourc
             d = d*2.0-1.0;
             d *= len as f32 / 5000.0;
             d *= i as f32 / p as f32;
-            let mut central_bias = window(d*0.5+0.5) + 2.0;
+            let mut central_bias = window(d*0.5+0.5) + 1.5;
             
             if offset == 0 && range < 450 // bias slightly towards the exact zero offset if this is probably the presence frequency bin
             {
@@ -108,7 +108,7 @@ fn do_timestretch(in_data : &[Sample], out_data : &mut Vec<Sample>, samplerate :
     
     let out_len = (in_data.len() as f64 * length_scale as f64) as usize;
     assert!(out_data.len() == (in_data.len() as f64 * length_scale as f64) as usize);
-    // if this is multi-pass, out_data contains data from previous passes, otherwise all zeroes
+    // if this is multi-pass and also not the first pass, out_data contains data from previous passes, otherwise all zeroes
     // we use the previous pass to help reduce phase cancellation artifacts
     // however, it's hard (maybe impossible) to do envelope adjustment 100% correctly with just a single buffer
     // so we also write to our own buffer and copy the original previous pass data so we can mix them together properly at the end
