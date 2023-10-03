@@ -44,7 +44,7 @@ pub (crate) struct Args {
     pub (crate) search_subdiv: isize,
     
     /// Number of increasingly subdivided search passes to do when searching for good chunk alignment.
-    #[arg(long, default_value_t=4)]
+    #[arg(long, default_value_t=5)]
     pub (crate) search_pass_count: u32,
     
     /// In multiband mode (the default mode), the chunk window size (in seconds) used when stretching the bass frequency band.
@@ -79,6 +79,16 @@ pub (crate) struct Args {
     /// Extremely high values will produce pre-ringing artifacts on sharp transients, in addition to being extremely slow.
     #[arg(long, verbatim_doc_comment, default_value_t=8.0)]
     pub (crate) cutoff_steepness : f64,
+    
+    /// Whether to do a combined energy estimation (i.e. including the higher-frequency bands) when doing chunk sliding or not.
+    /// When false, you might have long periods of obvious phase interference between frequency bands, especially if cutoff steepness is low.
+    /// When true, you might have moments of temporary energy loss in mid frequencies after transients.
+    #[arg(long, verbatim_doc_comment, default_value_t=false, action = clap::ArgAction::Set)]
+    pub (crate) combined_energy_estimation : bool,
+    
+    /// Whether to offset frequency bands in a way that attempts to prevent transients from sounding "wet".
+    #[arg(long, verbatim_doc_comment, default_value_t=true, action = clap::ArgAction::Set)]
+    pub (crate) smart_band_offset : bool,
 }
 
 pub (crate) fn frontend_acquire_audio(args : &Args) -> (Vec<Sample>, f64)
