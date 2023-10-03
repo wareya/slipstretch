@@ -11,7 +11,7 @@ The underlying audio stretching algorithm after splitting the audio stream up in
 
 ## Examples
 
-0.75x and 1.5x pitch shift music example:
+0.75x and 1.5x pitch shift music example (make sure to unmute it):
 
 https://github.com/wareya/slipstretch/assets/585488/4ade9eef-dcc3-4bcb-a515-42c2834f7b60
 
