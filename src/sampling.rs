@@ -46,6 +46,7 @@ pub (crate) fn generate_sinc_table(filter_size : usize, adjusted_freq : f32) -> 
     }
     (sinc_table, tangent_table)
 }
+/*
 pub (crate) fn interpolate_kernel(table : &[f32], tangents : &[f32], i : usize, t : f32) -> f32
 {
     let a = table[i%table.len()];
@@ -60,6 +61,7 @@ pub (crate) fn interpolate_sample(table : &[Sample], i : usize, t : f32) -> Samp
     let b = table[(i+1)%table.len()];
     a * (1.0 - t) + b * t
 }
+*/
 // sinc resampler
 pub (crate) fn resample(in_data : &[Sample], factor : f64) -> Vec<Sample>
 {
@@ -102,7 +104,7 @@ pub (crate) fn resample(in_data : &[Sample], factor : f64) -> Vec<Sample>
         let floored_pos = source_center.floor() as isize;
         let mut range = halflobe_range;
         let mut t_factor = 1.0;
-        if (factor < 1.0) // downsampling
+        if factor < 1.0 // downsampling
         {
             range = (16.0 / factor) as isize;
             t_factor = factor as f32;
