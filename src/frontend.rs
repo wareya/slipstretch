@@ -123,11 +123,11 @@ pub (crate) struct Args {
     pub (crate) amplitude_presence : f64,
 }
 
-use crate::SlipStreamArgs;
+use crate::slipstretch::SlipStretchArgs;
 impl Args {
-    pub (crate) fn to_slipstream_args(&self) -> SlipStreamArgs
+    pub (crate) fn to_slipstretch_args(&self) -> SlipStretchArgs
     {
-        SlipStreamArgs
+        SlipStretchArgs
         {
             length_scale: self.length_scale,
             pitch_scale: self.pitch_scale,

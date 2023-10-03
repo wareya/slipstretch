@@ -1,12 +1,12 @@
 #[derive(Clone, Copy, Debug, Default)]
-pub (crate) struct Sample
+pub struct Sample
 {
-    pub (crate) l: f32,
-    pub (crate) r: f32,
+    pub l: f32,
+    pub r: f32,
 }
 impl Sample
 {
-    pub (crate) fn energy_sq(&self) -> f32
+    pub fn energy_sq(&self) -> f32
     {
         self.l*self.l + self.r*self.r
     }
