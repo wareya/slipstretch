@@ -148,12 +148,14 @@ fn do_timestretch(in_data : &[Sample], out_data : &mut Vec<Sample>, samplerate :
         let mut real_window_secs = prev_good_window_secs;
         let window_size_estimate = ((samplerate * window_secs) as isize).max(4);
         
+        //let mut pitch = (0.0, 0.0);
+        let pitch;
         if args.attempt_match_frequency
         {
             let chunk_pos_in_estimate = chunk_pos_out * in_data.len() as isize / out_data.len() as isize;
             if chunk_pos_in_estimate >= 0 && ((chunk_pos_in_estimate + window_size_estimate) as usize) < in_data.len() && window_secs > 0.025
             {
-                let pitch = pitch_analysis(in_data, samplerate, chunk_pos_in_estimate, window_size_estimate);
+                pitch = pitch_analysis(in_data, samplerate, chunk_pos_in_estimate, window_size_estimate);
                 let n = (1.0 / slip_range).ceil() as usize * 2;
                 if pitch.1 > 0.5
                 {
@@ -162,24 +164,16 @@ fn do_timestretch(in_data : &[Sample], out_data : &mut Vec<Sample>, samplerate :
                 }
                 else
                 {
-                    //prev_good_window_secs = lerp(prev_good_window_secs, window_secs, 0.5_f64.powf(real_window_secs*4.0));
                     prev_good_window_secs = window_secs;
                 }
             }
         }
-        //println!("real window size: {} ... pitch: {:?}", real_window_secs, pitch);
         
         let window_size = ((samplerate * real_window_secs             ) as isize).max(4)/2*2;
         chunk_pos_out += window_size/lapping/2;
         let search_dist = ((samplerate * real_window_secs * slip_range) as isize).min(window_size/2-1).max(0);
         
-        // this is a guess
-        //let mut smart_offset = if args.smart_band_offset { ((1.0 - 2.0_f64.powf(1.0 - length_scale.powf((raw_lapping - 1) as f64))) * (window_size_estimate*2/3) as f64) as isize } else { 0 };
-        // the smart offset has to fade in or else the first split second of audio can sound wet
-        //smart_offset = (smart_offset as f64 * (chunk_pos_out as f64 / samplerate / (window_secs*2.0)).min(1.0)) as isize;
-        //let smart_offset = 0;
-        
-        let chunk_pos_in = chunk_pos_out * in_data.len() as isize / out_data.len() as isize;// - smart_offset;
+        let chunk_pos_in = chunk_pos_out * in_data.len() as isize / out_data.len() as isize;
         
         let chunk_start_out = chunk_pos_out - window_size/2;
         prev_chunk_start_out = chunk_start_out;
@@ -208,6 +202,31 @@ fn do_timestretch(in_data : &[Sample], out_data : &mut Vec<Sample>, samplerate :
                 }
             }
         }
+        
+        /*
+        // automatic pitch correction (bad)
+        
+        let mut aaaa = Vec::new();
+        let base_pitch = pitch.0.clamp(20.0, 20000.0) as f64;
+        let target_pitch = 2.0_f64.powf(((base_pitch/440.0).log(2.0) * 12.0).round() / 12.0) * 440.0;
+        let mut tuning_scale = base_pitch / target_pitch;
+        let tuned_window_size = ((window_size/2) as f64 / tuning_scale) as isize;
+        for mut i in chunk_pos_in-tuned_window_size..chunk_pos_in+tuned_window_size
+        {
+            if let Some(sample) = in_data.get(i as usize)
+            {
+                aaaa.push(*sample);
+            }
+            else
+            {
+                aaaa.push(Sample::default());
+            }
+        }
+        let in_data = resample_linear(&aaaa, tuning_scale);
+        let chunk_pos_in = in_data.len() as isize/2;
+        let chunk_start_in = chunk_pos_in - window_size/2;
+        */
+        
         let mut offs = 0;
         if chunk_pos_out > 0
         {
@@ -219,7 +238,7 @@ fn do_timestretch(in_data : &[Sample], out_data : &mut Vec<Sample>, samplerate :
         {
             let out_pos = chunk_start_out + j + offs;
             let in_pos = chunk_start_in + j;
-            if chunk_start_out < 0 || chunk_start_in < 0
+            if out_pos < 0 || in_pos < 0
             {
                 continue;
             }

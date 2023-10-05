@@ -92,7 +92,6 @@ pub (crate) fn resample(in_data : &[Sample], factor : f64) -> Vec<Sample>
     }
     let o = filter_size/2;
     */
-    println!("");
     let mut new_data = vec!(Sample { l : 0.0, r : 0.0 }; (in_data.len() as f64 * factor) as usize);
     let halflobe_range = 16;
     for i in 0..new_data.len()
@@ -125,6 +124,36 @@ pub (crate) fn resample(in_data : &[Sample], factor : f64) -> Vec<Sample>
     }
     new_data
 }
+/*
+pub (crate) fn resample_linear(in_data : &[Sample], factor : f64) -> Vec<Sample>
+{
+    if factor == 1.0
+    {
+        return in_data.to_vec();
+    }
+    let mut new_data = vec!(Sample { l : 0.0, r : 0.0 }; (in_data.len() as f64 * factor) as usize);
+    for i in 0..new_data.len()
+    {
+        let mut sum = Sample::default();
+        let mut e = 0.0;
+        
+        let source_center = i as f64 / factor;
+        let floored_pos = source_center.floor() as isize;
+        for j in 0..=1
+        {
+            let source = floored_pos + j;
+            let t = (source as f64 - source_center) as f32;
+            let sample = in_data.get(source as usize).map(|x| *x).unwrap_or_default();
+            let energy = (t+1.0).min(1.0-t);
+            sum += sample * energy;
+            e += energy;
+        }
+        sum /= e;
+        new_data[i] = sum;
+    }
+    new_data
+}
+*/
 
 pub (crate) fn do_freq_split(in_data : &[Sample], samplerate : f64, filter_size_s : f64, freq : f64) -> (Vec<Sample>, Vec<Sample>)
 {
@@ -183,14 +212,15 @@ pub (crate) fn pitch_analysis(data : &[Sample], samplerate : f64, pos : isize, l
     {
         let mut square_sum = 0.0;
         let mut j = 0;
+        let skip = 8;
         while j < len && i + j < signal.len()
         {
             let a = signal[j];
             let b = signal[i + j];
             square_sum += (a.l + a.r - mean) * (b.l + b.r - mean);
-            j += 8; // FIXME: performance hack
+            j += skip; // FIXME: performance hack
         }
-        correlations.push(square_sum / base_square_sum * (len as f32 / (j/8) as f32));
+        correlations.push(square_sum / base_square_sum * len as f32 * (skip as f32 / j as f32));
     }
     let mut found_negative = false;
     let mut max = 0.0;

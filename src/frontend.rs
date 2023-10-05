@@ -3,7 +3,8 @@ use crate::sample::Sample;
 
 /// An audio stretcher.
 #[derive(Clone, Debug, Parser)]
-pub (crate) struct Args {
+pub (crate) struct Args
+{
     /// Input wav filename.
     pub (crate) in_file_name: String,
 
@@ -139,7 +140,8 @@ pub (crate) struct Args {
 }
 
 use crate::slipstretch::SlipStretchArgs;
-impl Args {
+impl Args
+{
     pub (crate) fn to_slipstretch_args(&self) -> SlipStretchArgs
     {
         SlipStretchArgs
