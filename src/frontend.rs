@@ -45,6 +45,10 @@ pub (crate) struct Args {
     #[arg(long, default_value_t=5)]
     pub (crate) search_pass_count: u32,
     
+    /// Whether to enforce cross-band alignment when searching for aligned offsets.
+    #[arg(long, verbatim_doc_comment, default_value_t=true, action = clap::ArgAction::Set)]
+    pub (crate) cross_band_search_alignment : bool,
+    
     /// In multiband mode (the default mode), the chunk window size (in seconds) used when stretching the bass frequency band.
     /// Smaller chunk window sizes give better time-domain but worse frequency-domain results.
     #[arg(long, verbatim_doc_comment, default_value_t=0.2)]
@@ -103,8 +107,8 @@ pub (crate) struct Args {
     pub (crate) combined_energy_estimation : bool,
     
     /// Whether to offset frequency bands in a way that attempts to prevent transients from sounding "wet".
-    #[arg(long, verbatim_doc_comment, default_value_t=true, action = clap::ArgAction::Set)]
-    pub (crate) smart_band_offset : bool,
+    //#[arg(long, verbatim_doc_comment, default_value_t=true, action = clap::ArgAction::Set)]
+    //pub (crate) smart_band_offset : bool,
     
     /// Amplitude of the bass frequency band.
     #[arg(long, default_value_t=1.0)]
@@ -121,6 +125,17 @@ pub (crate) struct Args {
     /// Amplitude of the presence frequency band.
     #[arg(long, default_value_t=1.0)]
     pub (crate) amplitude_presence : f64,
+    
+    /// Disable the bass-mid-treble split without disabling the presence split. Bass, mids, and treble will end up in a single band, and presence in another band.
+    /// The bass-mid-treble band will use the settings for the bass band. The presence band will use the settings for the presence band. The cutoff frequency will be the treble-presence cutoff frequency.
+    /// This is useful for doing multi-band resizing with speech.
+    #[arg(long, verbatim_doc_comment, default_value_t=false, action = clap::ArgAction::Set)]
+    pub (crate) filter_disable_bass_mid_treble_split : bool,
+    
+    /// Whether to attempt to detect and follow the underlying main tone and pick a window size that matches it.
+    /// Has a big negative performance impact and usually makes things worse, except for very simple monophonic inputs.
+    #[arg(long, verbatim_doc_comment, default_value_t=false, action = clap::ArgAction::Set)]
+    pub (crate) attempt_match_frequency : bool,
 }
 
 use crate::slipstretch::SlipStretchArgs;
@@ -138,6 +153,7 @@ impl Args {
 
             search_subdiv: self.search_subdiv,
             search_pass_count: self.search_pass_count,
+            cross_band_search_alignment: self.cross_band_search_alignment,
             
             window_minimum_lapping : self.window_minimum_lapping,
             
@@ -155,12 +171,16 @@ impl Args {
             
             combined_energy_estimation : self.combined_energy_estimation,
             
-            smart_band_offset : self.smart_band_offset,
+            //smart_band_offset : self.smart_band_offset,
             
             amplitude_bass : self.amplitude_bass,
             amplitude_mid : self.amplitude_mid,
             amplitude_treble : self.amplitude_treble,
             amplitude_presence : self.amplitude_presence,
+            
+            filter_disable_bass_mid_treble_split : self.filter_disable_bass_mid_treble_split,
+            
+            attempt_match_frequency : self.attempt_match_frequency,
         }
     }
 }

@@ -12,6 +12,7 @@ pub struct SlipStretchArgs {
 
     pub search_subdiv: isize,
     pub search_pass_count: u32,
+    pub cross_band_search_alignment : bool,
     
     pub window_secs_bass : f64,
     pub window_secs_mid : f64,
@@ -29,12 +30,16 @@ pub struct SlipStretchArgs {
     
     pub combined_energy_estimation : bool,
     
-    pub smart_band_offset : bool,
+    //pub smart_band_offset : bool,
     
     pub amplitude_bass : f64,
     pub amplitude_mid : f64,
     pub amplitude_treble : f64,
     pub amplitude_presence : f64,
+    
+    pub filter_disable_bass_mid_treble_split : bool,
+    
+    pub attempt_match_frequency : bool,
 }
 
 fn calc_overlap_energy(pos_a_source : &[Sample], pos_a : isize, pos_b_source : &[Sample], pos_b : isize, len : isize) -> f32
@@ -44,7 +49,7 @@ fn calc_overlap_energy(pos_a_source : &[Sample], pos_a : isize, pos_b_source : &
     {
         let ap = pos_a + j;
         let bp = pos_b + j;
-        if ap < 0 || ap as usize >= pos_a_source.len() || bp as usize >= pos_b_source.len()
+        if ap < 0 || ap as usize >= pos_a_source.len() || bp < 0 || bp as usize >= pos_b_source.len()
         {
             continue;
         }
@@ -103,8 +108,6 @@ fn do_timestretch(in_data : &[Sample], out_data : &mut Vec<Sample>, samplerate :
 {
     let slip_range = args.slip_range.min(0.5);
     let length_scale = args.length_scale;
-    let window_size = ((samplerate * window_secs             ) as isize).max(4);
-    let search_dist = ((samplerate * window_secs * slip_range) as isize).min(window_size/2-1).max(0);
     
     let out_len = (in_data.len() as f64 * length_scale as f64) as usize;
     assert!(out_data.len() == (in_data.len() as f64 * length_scale as f64) as usize);
@@ -122,7 +125,8 @@ fn do_timestretch(in_data : &[Sample], out_data : &mut Vec<Sample>, samplerate :
     {
         lapping = lapping.max((2.0 / length_scale.min(1.0)).ceil() as isize);
     }
-    let raw_lapping = lapping;
+    let _raw_lapping = lapping;
+    
     lapping = lapping.max(args.window_minimum_lapping);
     println!("lapping: {}", lapping);
     
@@ -136,57 +140,102 @@ fn do_timestretch(in_data : &[Sample], out_data : &mut Vec<Sample>, samplerate :
     } as f32;
     
     let mut offsets = Vec::new();
-    for i in 0..out_data.len() as isize/window_size*lapping
+    let mut chunk_pos_out = 0;
+    let mut prev_good_window_secs = window_secs;
+    let mut prev_chunk_start_out = 0;
+    while prev_chunk_start_out < out_data.len() as isize
     {
-        let chunk_pos_out = i*window_size/lapping;
+        let mut real_window_secs = prev_good_window_secs;
+        let window_size_estimate = ((samplerate * window_secs) as isize).max(4);
+        
+        if args.attempt_match_frequency
+        {
+            let chunk_pos_in_estimate = chunk_pos_out * in_data.len() as isize / out_data.len() as isize;
+            if chunk_pos_in_estimate >= 0 && ((chunk_pos_in_estimate + window_size_estimate) as usize) < in_data.len() && window_secs > 0.025
+            {
+                let pitch = pitch_analysis(in_data, samplerate, chunk_pos_in_estimate, window_size_estimate);
+                let n = (1.0 / slip_range).ceil() as usize * 2;
+                if pitch.1 > 0.5
+                {
+                    real_window_secs = (1.0 / pitch.0 as f64 * n as f64).clamp(0.005, 0.2);
+                    prev_good_window_secs = real_window_secs;
+                }
+                else
+                {
+                    //prev_good_window_secs = lerp(prev_good_window_secs, window_secs, 0.5_f64.powf(real_window_secs*4.0));
+                    prev_good_window_secs = window_secs;
+                }
+            }
+        }
+        //println!("real window size: {} ... pitch: {:?}", real_window_secs, pitch);
+        
+        let window_size = ((samplerate * real_window_secs             ) as isize).max(4)/2*2;
+        chunk_pos_out += window_size/lapping/2;
+        let search_dist = ((samplerate * real_window_secs * slip_range) as isize).min(window_size/2-1).max(0);
         
         // this is a guess
-        let mut smart_offset = if args.smart_band_offset { ((1.0 - 2.0_f64.powf(1.0 - length_scale.powf((raw_lapping - 1) as f64))) * (window_size*2/3) as f64) as isize } else { 0 };
+        //let mut smart_offset = if args.smart_band_offset { ((1.0 - 2.0_f64.powf(1.0 - length_scale.powf((raw_lapping - 1) as f64))) * (window_size_estimate*2/3) as f64) as isize } else { 0 };
+        // the smart offset has to fade in or else the first split second of audio can sound wet
+        //smart_offset = (smart_offset as f64 * (chunk_pos_out as f64 / samplerate / (window_secs*2.0)).min(1.0)) as isize;
+        //let smart_offset = 0;
         
-        let min_fadein = (args.length_scale.max(1.0) * 2.0).floor() as isize;
-        smart_offset = smart_offset * i.min(min_fadein) / min_fadein; // the smart offset has to fade in or else the first split second of audio can sound wet
-        let chunk_pos_in = chunk_pos_out * in_data.len() as isize / out_data.len() as isize - smart_offset;
+        let chunk_pos_in = chunk_pos_out * in_data.len() as isize / out_data.len() as isize;// - smart_offset;
+        
+        let chunk_start_out = chunk_pos_out - window_size/2;
+        prev_chunk_start_out = chunk_start_out;
+        let chunk_start_in = chunk_pos_in - window_size/2;
         
         let mut min_offs = -1000000;
-        if let Some(known) = known_offsets
+        if args.cross_band_search_alignment
         {
-            let _i = known.binary_search_by(|pair| pair.0.cmp(&chunk_pos_out));
-            if let Ok(i) = _i
+            if let Some(known) = known_offsets
             {
-                min_offs = known[i].1;
-            }
-            else if let Err(i) = _i
-            {
-                if i > 0
+                let _o = known.binary_search_by(|pair| pair.0.cmp(&chunk_pos_out));
+                if let Ok(o) = _o
                 {
-                    min_offs = known[i-1].1;
-                    if i < known.len()
+                    min_offs = known[o].1;
+                }
+                else if let Err(o) = _o
+                {
+                    if o > 0
                     {
-                        min_offs = min_offs.max(known[i].1);
+                        min_offs = known[o-1].1;
+                        if o < known.len()
+                        {
+                            min_offs = min_offs.max(known[o].1);
+                        }
                     }
                 }
             }
         }
         let mut offs = 0;
-        if i > 0
+        if chunk_pos_out > 0
         {
-            offs = find_best_overlap(args.search_subdiv, args.search_pass_count, &out_data[..], chunk_pos_out, &in_data[..], chunk_pos_in, window_size, search_dist, min_offs);
+            offs = find_best_overlap(args.search_subdiv, args.search_pass_count, &out_data[..], chunk_start_out, &in_data[..], chunk_start_in, window_size, search_dist, min_offs);
         }
         offsets.push((chunk_pos_out, offs));
         
         for j in 0..window_size
         {
-            if (chunk_pos_out + j + offs) as usize >= out_data.len() || (chunk_pos_in + j) as usize >= in_data.len()
+            let out_pos = chunk_start_out + j + offs;
+            let in_pos = chunk_start_in + j;
+            if chunk_start_out < 0 || chunk_start_in < 0
+            {
+                continue;
+            }
+            if out_pos as usize >= out_data.len() || in_pos as usize >= in_data.len()
             {
                 break;
             }
             let t = (j as f32 + 0.5) / (window_size as f32);
             let w = window(t) * amp;
-            let d = in_data[(chunk_pos_in + j) as usize];
-            out_data[(chunk_pos_out + j + offs) as usize] += d*w;
-            own_data[(chunk_pos_out + j + offs) as usize] += d*w;
-            envelope[(chunk_pos_out + j + offs) as usize] += w;
+            let d = in_data[in_pos as usize];
+            out_data[out_pos as usize] += d*w;
+            own_data[out_pos as usize] += d*w;
+            envelope[out_pos as usize] += w;
         }
+        
+        chunk_pos_out += window_size/lapping/2;
     }
     for i in 0..out_data.len()
     {
@@ -230,50 +279,88 @@ pub fn run_slipstretch(samples : &[Sample], samplerate : f64, mut args : SlipStr
                     1.0 / cutoff * args.cutoff_steepness
                 }
             }.max(0.001);
-            let (bass, _temp)      = do_freq_split(&in_data[..], samplerate, get_filter_length(args.cutoff_bass_mid       ), args.cutoff_bass_mid);
-            let (mid, _temp)       = do_freq_split(&_temp[..]  , samplerate, get_filter_length(args.cutoff_mid_treble     ), args.cutoff_mid_treble);
-            let (treble, presence) = do_freq_split(&_temp[..]  , samplerate, get_filter_length(args.cutoff_treble_presence), args.cutoff_treble_presence);
             
-            if args.combined_energy_estimation
+            // FIXME this is dumb and overly repetitive
+            if !args.filter_disable_bass_mid_treble_split
             {
-                println!("using combined energy estimation");
-                
-                let mut out_data = vec![Sample { l: 0.0, r: 0.0 }; out_len];
-                println!("timestretching presence frequency band...");
-                let presence_offs = do_timestretch(&presence [..], &mut out_data, samplerate, &args, 0, args.window_secs_presence, None);
-                println!("timestretching treble frequency band...");
-                let treble_offs   = do_timestretch(&treble   [..], &mut out_data, samplerate, &args, 1, args.window_secs_treble, Some(&presence_offs));
-                println!("timestretching mid frequency band...");
-                let mid_offs      = do_timestretch(&mid      [..], &mut out_data, samplerate, &args, 2, args.window_secs_mid, Some(&treble_offs));
-                println!("timestretching bass frequency band...");
-                let _             = do_timestretch(&bass     [..], &mut out_data, samplerate, &args, 3, args.window_secs_bass, Some(&mid_offs));
-                out_data
+                let (bass, _temp)      = do_freq_split(&in_data[..], samplerate, get_filter_length(args.cutoff_bass_mid       ), args.cutoff_bass_mid);
+                let (mid, _temp)       = do_freq_split(&_temp[..]  , samplerate, get_filter_length(args.cutoff_mid_treble     ), args.cutoff_mid_treble);
+                let (treble, presence) = do_freq_split(&_temp[..]  , samplerate, get_filter_length(args.cutoff_treble_presence), args.cutoff_treble_presence);
+            
+                if args.combined_energy_estimation
+                {
+                    println!("using combined energy estimation");
+                    
+                    let mut out_data = vec![Sample { l: 0.0, r: 0.0 }; out_len];
+                    println!("timestretching presence frequency band...");
+                    let presence_offs = do_timestretch(&presence [..], &mut out_data, samplerate, &args, 0, args.window_secs_presence, None);
+                    println!("timestretching treble frequency band...");
+                    let treble_offs   = do_timestretch(&treble   [..], &mut out_data, samplerate, &args, 1, args.window_secs_treble, Some(&presence_offs));
+                    println!("timestretching mid frequency band...");
+                    let mid_offs      = do_timestretch(&mid      [..], &mut out_data, samplerate, &args, 2, args.window_secs_mid, Some(&treble_offs));
+                    println!("timestretching bass frequency band...");
+                    let _             = do_timestretch(&bass     [..], &mut out_data, samplerate, &args, 3, args.window_secs_bass, Some(&mid_offs));
+                    out_data
+                }
+                else
+                {
+                    println!("using independent energy estimation");
+                    
+                    println!("timestretching presence frequency band...");
+                    let mut out_presence = vec![Sample { l: 0.0, r: 0.0 }; out_len];
+                    let presence_offs = do_timestretch(&presence [..], &mut out_presence, samplerate, &args, 0, args.window_secs_presence, None);
+                    println!("timestretching treble frequency band...");
+                    let mut out_treble = vec![Sample { l: 0.0, r: 0.0 }; out_len];
+                    let treble_offs   = do_timestretch(&treble   [..], &mut out_treble  , samplerate, &args, 1, args.window_secs_treble, Some(&presence_offs));
+                    println!("timestretching mid frequency band...");
+                    let mut out_mid = vec![Sample { l: 0.0, r: 0.0 }; out_len];
+                    let mid_offs      = do_timestretch(&mid      [..], &mut out_mid     , samplerate, &args, 2, args.window_secs_mid, Some(&treble_offs));
+                    println!("timestretching bass frequency band...");
+                    let mut out_bass = vec![Sample { l: 0.0, r: 0.0 }; out_len];
+                    let _             = do_timestretch(&bass     [..], &mut out_bass    , samplerate, &args, 3, args.window_secs_bass, Some(&mid_offs));
+                    
+                    for (i, val) in out_presence.iter_mut().enumerate()
+                    {
+                        *val += out_treble[i];
+                        *val += out_mid[i];
+                        *val += out_bass[i];
+                    }
+            
+                    out_presence
+                }
             }
             else
             {
-                println!("using independent energy estimation");
-                
-                println!("timestretching presence frequency band...");
-                let mut out_presence = vec![Sample { l: 0.0, r: 0.0 }; out_len];
-                let presence_offs = do_timestretch(&presence [..], &mut out_presence, samplerate, &args, 0, args.window_secs_presence, None);
-                println!("timestretching treble frequency band...");
-                let mut out_treble = vec![Sample { l: 0.0, r: 0.0 }; out_len];
-                let treble_offs   = do_timestretch(&treble   [..], &mut out_treble  , samplerate, &args, 1, args.window_secs_treble, Some(&presence_offs));
-                println!("timestretching mid frequency band...");
-                let mut out_mid = vec![Sample { l: 0.0, r: 0.0 }; out_len];
-                let mid_offs      = do_timestretch(&mid      [..], &mut out_mid     , samplerate, &args, 2, args.window_secs_mid, Some(&treble_offs));
-                println!("timestretching bass frequency band...");
-                let mut out_bass = vec![Sample { l: 0.0, r: 0.0 }; out_len];
-                let _             = do_timestretch(&bass     [..], &mut out_bass    , samplerate, &args, 3, args.window_secs_bass, Some(&mid_offs));
-                
-                for (i, val) in out_bass.iter_mut().enumerate()
+                let (other, presence) = do_freq_split(&in_data[..]  , samplerate, get_filter_length(args.cutoff_treble_presence), args.cutoff_treble_presence);
+                if args.combined_energy_estimation
                 {
-                    *val += out_mid[i];
-                    *val += out_treble[i];
-                    *val += out_presence[i];
+                    println!("using combined energy estimation");
+                    
+                    let mut out_data = vec![Sample { l: 0.0, r: 0.0 }; out_len];
+                    println!("timestretching presence frequency band...");
+                    let presence_offs = do_timestretch(&presence [..], &mut out_data, samplerate, &args, 0, args.window_secs_presence, None);
+                    println!("timestretching non-presence frequency band...");
+                    let _             = do_timestretch(&other    [..], &mut out_data, samplerate, &args, 3, args.window_secs_bass, Some(&presence_offs));
+                    out_data
                 }
-        
-                out_bass
+                else
+                {
+                    println!("using independent energy estimation");
+                    
+                    println!("timestretching presence frequency band...");
+                    let mut out_presence = vec![Sample { l: 0.0, r: 0.0 }; out_len];
+                    let presence_offs = do_timestretch(&presence [..], &mut out_presence, samplerate, &args, 0, args.window_secs_presence, None);
+                    println!("timestretching non-presence frequency band...");
+                    let mut out_other = vec![Sample { l: 0.0, r: 0.0 }; out_len];
+                    let _             = do_timestretch(&other    [..], &mut out_other   , samplerate, &args, 3, args.window_secs_bass, Some(&presence_offs));
+                    
+                    for (i, val) in out_presence.iter_mut().enumerate()
+                    {
+                        *val += out_other[i];
+                    }
+            
+                    out_presence
+                }
             }
         }
         else

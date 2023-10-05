@@ -161,3 +161,70 @@ pub (crate) fn do_freq_split(in_data : &[Sample], samplerate : f64, filter_size_
     }
     (out_lo, out_hi)
 }
+
+pub (crate) fn pitch_analysis(data : &[Sample], samplerate : f64, pos : isize, len : isize) -> (f32, f32)
+{
+    let mut len = len as usize * 2;
+    len = len.clamp(441, 4410); // FIXME ????
+    
+    let pos = (pos - (len/2) as isize).max(0);
+    while pos as usize + len > data.len()
+    {
+        len /= 2; // FIXME ???? why not just set it to data.len() - pos
+    }
+    
+    let signal = &data[pos as usize..pos as usize + len];
+    let mean = signal.iter().map(|x| x.l + x.r).sum::<f32>() / len as f32;
+    
+    let base_square_sum = signal.iter().map(|x| (x.l + x.r - mean) * (x.l + x.r - mean)).sum::<f32>();
+    
+    let mut correlations : Vec<f32> = Vec::new();
+    for i in 0..len/2
+    {
+        let mut square_sum = 0.0;
+        let mut j = 0;
+        while j < len && i + j < signal.len()
+        {
+            let a = signal[j];
+            let b = signal[i + j];
+            square_sum += (a.l + a.r - mean) * (b.l + b.r - mean);
+            j += 8; // FIXME: performance hack
+        }
+        correlations.push(square_sum / base_square_sum * (len as f32 / (j/8) as f32));
+    }
+    let mut found_negative = false;
+    let mut max = 0.0;
+    let mut max_i = 0;
+    for i in 0..correlations.len()
+    {
+        if found_negative
+        {
+            if correlations[i] > max
+            {
+                max = correlations[i];
+                max_i = i;
+            }
+        }
+        if correlations[i] < 0.0
+        {
+            found_negative = true;
+        }
+    }
+    if max_i > 0
+    {
+        let info = ((samplerate / max_i as f64) as f32, max);
+        //println!("{}\t{}\t{}", info.0, pos, info.1);
+        return info;
+    }
+    (440.0, 0.0)
+}
+/*
+fn lerp(a : f64, b : f64, t : f64) -> f64
+{
+    a * (1.0 - t) + b * t
+}
+fn lerp_f32(a : f32, b : f32, t : f32) -> f32
+{
+    a * (1.0 - t) + b * t
+}
+*/
